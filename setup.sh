@@ -1,27 +1,18 @@
 #!/bin/bash
 
-# Update system packages
+# อัปเดตแพ็คเกจระบบ
 apt-get update
 
-# Install system dependencies for Google Sheets
+# ติดตั้ง dependencies ของระบบสำหรับ Google Sheets
 apt-get install -y build-essential libssl-dev libffi-dev python3-dev
 
-# Upgrade pip
+# อัปเกรด pip
 pip install --upgrade pip
 
-# Install Python packages
-pip install --no-cache-dir streamlit==1.28.1
-pip install --no-cache-dir pandas==2.1.3
-pip install --no-cache-dir gspread==5.11.3
-pip install --no-cache-dir google-auth==2.23.0
-pip install --no-cache-dir google-auth-oauthlib==1.1.0
-pip install --no-cache-dir google-auth-httplib2==0.1.0
-pip install --no-cache-dir google-api-python-client==2.108.0
-pip install --no-cache-dir oauth2client==4.1.3
-pip install --no-cache-dir Pillow==10.1.0
-pip install --no-cache-dir pyOpenSSL==23.2.0
+# ติดตั้งแพ็คเกจ Python
+pip install --no-cache-dir -r requirements.txt
 
-# Create necessary directories
+# สร้างไดเรกทอรีที่จำเป็น
 mkdir -p save_data/images
 mkdir -p save_data/documents
 mkdir -p save_data/certificates
