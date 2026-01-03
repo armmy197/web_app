@@ -13,78 +13,22 @@ eggs/
 lib/
 lib64/
 parts/
-sdk/
+svelte/
 var/
-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# Environments
-.env
-.venv
-env/
+# Virtual Environment
 venv/
+env/
 ENV/
-env.bak/
-venv.bak/
 
-# Streamlit
-.streamlit/
-
-# Data files
-data/
-save_data/
-images_logo/
-*.xlsx
-*.json
-*.txt
-*.pdf
-*.doc
-*.docx
-*.ppt
-*.pptx
-*.jpg
-*.jpeg
-*.png
-*.gif
-
-# Secrets
-secrets.toml
-.devcontainer/
-*.pem
-*.key
-*.crt
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # OS
 .DS_Store
@@ -95,16 +39,15 @@ secrets.toml
 ehthumbs.db
 Thumbs.db
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+# Streamlit
+.streamlit/
 
-# Temporary files
-*.tmp
-*.temp
+# Data files
+data/
+save_data/
+credentials.json
+*.pem
+*.key
 
-# Logs
-*.log
+# Environment variables
+.env
