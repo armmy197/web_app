@@ -10,6 +10,10 @@ import uuid
 import base64
 from PIL import Image
 import io
+import gspread
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
 # -----------------------------
 # Page config
@@ -19,6 +23,344 @@ st.set_page_config(
     layout="wide",
     page_icon="🎓"
 )
+
+# -----------------------------
+# Google Sheets Configuration
+# -----------------------------
+def init_google_sheets():
+    """Initialize Google Sheets connection"""
+    try:
+        # For deployment, use Streamlit secrets
+        if 'GOOGLE_CREDENTIALS' in st.secrets:
+            credentials_dict = dict(st.secrets['GOOGLE_CREDENTIALS'])
+            credentials = Credentials.from_service_account_info(
+                credentials_dict,
+                scopes=[
+                    'https://www.googleapis.com/auth/spreadsheets',
+                    'https://www.googleapis.com/auth/drive'
+                ]
+            )
+        else:
+            # For local development, use service account file
+            creds_file = 'credentials.json'
+            if os.path.exists(creds_file):
+                credentials = Credentials.from_service_account_file(
+                    creds_file,
+                    scopes=[
+                        'https://www.googleapis.com/auth/spreadsheets',
+                        'https://www.googleapis.com/auth/drive'
+                    ]
+                )
+            else:
+                st.error("กรุณาตั้งค่า Google Cloud Credentials")
+                return None, None
+        
+        # Create clients
+        gc = gspread.authorize(credentials)
+        drive_service = build('drive', 'v3', credentials=credentials)
+        
+        return gc, drive_service
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการเชื่อมต่อ Google Sheets: {e}")
+        return None, None
+
+# Initialize Google Sheets connection
+gc, drive_service = init_google_sheets()
+
+# -----------------------------
+# Google Sheets Helper Functions
+# -----------------------------
+def get_or_create_spreadsheet(spreadsheet_name):
+    """Get or create a Google Spreadsheet"""
+    try:
+        # Try to open existing spreadsheet
+        spreadsheet = gc.open(spreadsheet_name)
+    except gspread.SpreadsheetNotFound:
+        # Create new spreadsheet
+        spreadsheet = gc.create(spreadsheet_name)
+        
+        # Share with yourself (optional)
+        spreadsheet.share('your-email@gmail.com', perm_type='user', role='writer')
+    
+    return spreadsheet
+
+def get_sheet_data(sheet_name, spreadsheet_name="ZL_TA_Learning_DB"):
+    """Read data from Google Sheet"""
+    try:
+        spreadsheet = get_or_create_spreadsheet(spreadsheet_name)
+        worksheet = spreadsheet.worksheet(sheet_name)
+        records = worksheet.get_all_records()
+        return pd.DataFrame(records)
+    except Exception as e:
+        st.warning(f"ไม่พบข้อมูลใน {sheet_name}: {e}")
+        return pd.DataFrame()
+
+def update_sheet_data(sheet_name, df, spreadsheet_name="ZL_TA_Learning_DB"):
+    """Update Google Sheet with DataFrame"""
+    try:
+        spreadsheet = get_or_create_spreadsheet(spreadsheet_name)
+        
+        # Try to get existing worksheet
+        try:
+            worksheet = spreadsheet.worksheet(sheet_name)
+        except gspread.WorksheetNotFound:
+            # Create new worksheet
+            worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
+        
+        # Clear existing data
+        worksheet.clear()
+        
+        # Convert DataFrame to list of lists
+        data = [df.columns.tolist()] + df.values.tolist()
+        
+        # Update sheet
+        worksheet.update('A1', data)
+        
+        return True
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการบันทึกข้อมูล: {e}")
+        return False
+
+def append_to_sheet(sheet_name, new_row, spreadsheet_name="ZL_TA_Learning_DB"):
+    """Append new row to Google Sheet"""
+    try:
+        spreadsheet = get_or_create_spreadsheet(spreadsheet_name)
+        worksheet = spreadsheet.worksheet(sheet_name)
+        
+        # Get current data to find next empty row
+        current_data = worksheet.get_all_values()
+        next_row = len(current_data) + 1 if current_data else 1
+        
+        # Append new row
+        worksheet.append_row(new_row)
+        
+        return True
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการเพิ่มข้อมูล: {e}")
+        return False
+
+def update_sheet_row(sheet_name, column_name, search_value, updates):
+    """Update specific row in Google Sheet"""
+    try:
+        spreadsheet = get_or_create_spreadsheet(spreadsheet_name)
+        worksheet = spreadsheet.worksheet(sheet_name)
+        
+        # Get all records
+        records = worksheet.get_all_records()
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(records)
+        
+        if not df.empty and column_name in df.columns:
+            # Find row index
+            row_index = df[df[column_name] == search_value].index
+            
+            if len(row_index) > 0:
+                # Update the row (add 2 for header and 1-based index)
+                row_num = row_index[0] + 2
+                
+                # Get current row values
+                current_row = worksheet.row_values(row_num)
+                
+                # Update values
+                for key, value in updates.items():
+                    if key in df.columns:
+                        col_index = df.columns.get_loc(key)
+                        # Ensure list is long enough
+                        while len(current_row) <= col_index:
+                            current_row.append('')
+                        current_row[col_index] = value
+                
+                # Update the row
+                worksheet.update(f'A{row_num}', [current_row])
+                return True
+        
+        return False
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการอัปเดตข้อมูล: {e}")
+        return False
+
+# -----------------------------
+# Modified Data Access Functions
+# -----------------------------
+def check_student_id(student_id):
+    """ตรวจสอบสิทธิ์นักเรียนด้วย ID (Google Sheets)"""
+    try:
+        students_df = get_sheet_data("students")
+        student_info = students_df[students_df["student_id"] == student_id.upper()]
+        
+        if not student_info.empty:
+            student = student_info.iloc[0]
+            
+            # บันทึกการตรวจสอบสิทธิ์
+            check_df = get_sheet_data("students_check")
+            
+            # นับจำนวนครั้งที่เคยเข้าเรียน
+            attendance_count = 0
+            if not check_df.empty and "student_id" in check_df.columns:
+                student_checks = check_df[check_df["student_id"] == student_id.upper()]
+                attendance_count = len(student_checks) if not student_checks.empty else 0
+            
+            # บันทึกข้อมูลใหม่
+            new_check = {
+                "check_id": f"CHK{int(time.time())}",
+                "student_id": student_id.upper(),
+                "fullname": student["fullname"],
+                "check_date": datetime.now().strftime("%Y-%m-%d"),
+                "check_time": datetime.now().strftime("%H:%M:%S"),
+                "attendance_count": attendance_count + 1,
+                "status": "verified"
+            }
+            
+            # เพิ่มข้อมูลใหม่
+            append_to_sheet("students_check", list(new_check.values()))
+            
+            return True, student["fullname"], student["email"]
+        else:
+            return False, None, None
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการตรวจสอบรหัสนักเรียน: {e}")
+        return False, None, None
+
+def get_student_courses(student_id):
+    """ดึงคอร์สที่นักเรียนลงทะเบียน (Google Sheets)"""
+    try:
+        df = get_sheet_data("student_courses")
+        if not df.empty and "student_id" in df.columns:
+            return df[df["student_id"] == student_id]
+        return pd.DataFrame()
+    except:
+        return pd.DataFrame()
+
+def enroll_student_in_course(student_id, student_name, course_id, course_name):
+    """ลงทะเบียนนักเรียนในคอร์ส (Google Sheets)"""
+    try:
+        df = get_sheet_data("student_courses")
+        
+        # ตรวจสอบว่าลงทะเบียนแล้วหรือยัง
+        already_enrolled = df[
+            (df["student_id"] == student_id) & 
+            (df["course_id"] == course_id)
+        ].shape[0] > 0
+        
+        if not already_enrolled:
+            new_enrollment = {
+                "enrollment_id": f"ENR{int(time.time())}",
+                "student_id": student_id,
+                "fullname": student_name,
+                "course_id": course_id,
+                "course_name": course_name,
+                "enrollment_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "completion_status": False,
+                "completion_date": "",
+                "certificate_issued": False
+            }
+            
+            append_to_sheet("student_courses", list(new_enrollment.values()))
+            return True
+        return False
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการลงทะเบียน: {e}")
+        return False
+
+def mark_course_completed(student_id, course_id):
+    """บันทึกสถานะเรียนจบคอร์ส (Google Sheets)"""
+    try:
+        updates = {
+            "completion_status": True,
+            "completion_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        # Find the enrollment_id
+        df = get_sheet_data("student_courses")
+        enrollment = df[(df["student_id"] == student_id) & (df["course_id"] == course_id)]
+        
+        if not enrollment.empty:
+            enrollment_id = enrollment.iloc[0]["enrollment_id"]
+            success = update_sheet_row("student_courses", "enrollment_id", enrollment_id, updates)
+            return success
+        
+        return False
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
+        return False
+
+def teacher_login(username, password):
+    """ตรวจสอบการเข้าสู่ระบบครูผู้สอน (Google Sheets)"""
+    try:
+        admin_df = get_sheet_data("admin")
+        
+        if not admin_df.empty:
+            user_record = admin_df[admin_df["username"] == username]
+            
+            if not user_record.empty:
+                teacher = user_record.iloc[0]
+                password_hash = md5(password)
+                
+                if teacher["password_hash"] == password_hash:
+                    return True, "เข้าสู่ระบบสำเร็จ!", teacher["teacher_id"], teacher["fullname"]
+                else:
+                    return False, "รหัสผ่านไม่ถูกต้อง", None, None
+            else:
+                return False, "ไม่พบบัญชีผู้ใช้งาน", None, None
+        else:
+            return False, "ไม่มีข้อมูลในระบบ", None, None
+    except Exception as e:
+        return False, f"เกิดข้อผิดพลาด: {e}", None, None
+
+def get_teacher_courses(teacher_id):
+    """ดึงคอร์สของครูผู้สอน (Google Sheets)"""
+    try:
+        courses_df = get_sheet_data("courses")
+        if not courses_df.empty and "teacher_id" in courses_df.columns:
+            return courses_df[courses_df["teacher_id"] == teacher_id]
+        return pd.DataFrame()
+    except:
+        return pd.DataFrame()
+
+def get_available_courses():
+    """ดึงคอร์สทั้งหมดที่เปิดสอน (Google Sheets)"""
+    try:
+        courses_df = get_sheet_data("courses")
+        if not courses_df.empty:
+            return courses_df
+        return pd.DataFrame()
+    except:
+        return pd.DataFrame()
+
+def create_new_course(course_data):
+    """สร้างคอร์สใหม่ (Google Sheets)"""
+    try:
+        # Get current courses
+        courses_df = get_sheet_data("courses")
+        
+        # Append new course
+        append_to_sheet("courses", list(course_data.values()))
+        
+        # Create empty lesson file
+        course_id = course_data["course_id"]
+        lesson_file = f"save_data/lessons/{course_id}_lessons.json"
+        with open(lesson_file, "w", encoding="utf-8") as f:
+            json.dump([], f)
+        
+        # Create empty exercise file
+        exercise_file = f"save_data/lessons/{course_id}_exercises.json"
+        with open(exercise_file, "w", encoding="utf-8") as f:
+            json.dump([], f)
+        
+        return True
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการสร้างคอร์ส: {e}")
+        return False
+
+def update_course(course_id, updates):
+    """อัปเดตข้อมูลคอร์ส (Google Sheets)"""
+    try:
+        success = update_sheet_row("courses", "course_id", course_id, updates)
+        return success
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการอัปเดตคอร์ส: {e}")
+        return False
 
 # -----------------------------
 # CSS - ออกแบบใหม่ตามโทนสีที่กำหนด
@@ -642,14 +984,10 @@ if "show_lessons" not in st.session_state:
     st.session_state.show_lessons = True
 
 # -----------------------------
-# Helper Functions
+# Helper Functions (ที่ยังใช้ไฟล์ JSON)
 # -----------------------------
 def init_data_folder():
-    """Initialize data folder and required files"""
-    # Create main data folder
-    data_folder = "data"
-    os.makedirs(data_folder, exist_ok=True)
-    
+    """Initialize data folder for files (ยังใช้สำหรับ JSON และรูปภาพ)"""
     # Create save_data folder
     save_data = "save_data"
     os.makedirs(save_data, exist_ok=True)
@@ -666,252 +1004,89 @@ def init_data_folder():
     # Create exercise_images folder
     os.makedirs(f"{save_data}/exercise_images", exist_ok=True)
     
-    # ============================================
-    # STUDENT DATA FILES (data/)
-    # ============================================
-    
-    # 1. students.xlsx - ข้อมูลผู้เรียน
-    if not os.path.exists(f"{data_folder}/students.xlsx"):
-        df_students = pd.DataFrame(columns=[
-            "student_id", 
-            "fullname", 
-            "email", 
-            "phone", 
-            "created_date", 
-            "status"
-        ])
-        df_students.to_excel(f"{data_folder}/students.xlsx", index=False)
-    
-    # 2. courses.xlsx - ข้อมูลคอร์สเรียน
-    if not os.path.exists(f"{data_folder}/courses.xlsx"):
-        df_courses = pd.DataFrame(columns=[
-            "course_id",
-            "course_name", 
-            "teacher_id",
-            "teacher_name",
-            "description",
-            "image_path",
-            "jitsi_room",
-            "max_students",
-            "current_students",
-            "class_type",
-            "status",
-            "security_code",
-            "created_date"
-        ])
-        df_courses.to_excel(f"{data_folder}/courses.xlsx", index=False)
-    
-    # 3. admin.xlsx - ข้อมูลครู/ผู้ดูแล (แก้ไขเพิ่มเติม)
-    if not os.path.exists(f"{data_folder}/admin.xlsx"):
-        df_admin = pd.DataFrame(columns=[
-            "teacher_id",
-            "username",
-            "password_hash",
-            "fullname",
-            "email",
-            "created_at",
-            "role"
-        ])
-        
-        df_admin.to_excel(f"{data_folder}/admin.xlsx", index=False)
-        
-    # ============================================
-    # CHECK AND TEACHER DATA FILES (save_data/)
-    # ============================================
-    
-    # 4. students_check.xlsx - ประวัติการเข้าเรียน
-    if not os.path.exists(f"{save_data}/students_check.xlsx"):
-        df_check = pd.DataFrame(columns=[
-            "check_id",
-            "student_id", 
-            "fullname",
-            "check_date",
-            "check_time",
-            "attendance_count",
-            "status"
-        ])
-        df_check.to_excel(f"{save_data}/students_check.xlsx", index=False)
-    
-    # 5. teachers.xlsx - ข้อมูลครู (สำรอง)
-    if not os.path.exists(f"{save_data}/teachers.xlsx"):
-        df_teachers = pd.DataFrame(columns=[
-            "teacher_id",
-            "username",
-            "password_hash",
-            "fullname",
-            "email",
-            "phone",
-            "created_at",
-            "role",
-            "status"
-        ])
-        df_teachers.to_excel(f"{save_data}/teachers.xlsx", index=False)
-    
-    # 6. student_courses.xlsx - การลงทะเบียนคอร์ส
-    if not os.path.exists(f"{save_data}/student_courses.xlsx"):
-        df_student_courses = pd.DataFrame(columns=[
-            "enrollment_id",
-            "student_id", 
-            "fullname",
-            "course_id", 
-            "course_name",
-            "enrollment_date",
-            "completion_status",
-            "completion_date",
-            "certificate_issued"
-        ])
-        df_student_courses.to_excel(f"{save_data}/student_courses.xlsx", index=False)
-    
     # Create lessons folder
     os.makedirs(f"{save_data}/lessons", exist_ok=True)
     
     # Create quiz results folder
     os.makedirs(f"{save_data}/quiz_results", exist_ok=True)
     
-    # Create certificates_files folder for uploaded certificates
+    # Create certificates_files folder
     os.makedirs(f"{save_data}/certificates_files", exist_ok=True)
     
-    # สร้างข้อมูลนักเรียนตัวอย่าง (ถ้ายังไม่มี)
-    try:
-        students_df = pd.read_excel(f"{data_folder}/students.xlsx")
-        if students_df.empty:
-            # เพิ่มนักเรียนตัวอย่าง
-            sample_students = [
-                {
-                    "student_id": "ZLS101",
-                    "fullname": "สมชาย ใจดี",
-                    "email": "somchai@example.com",
-                    "phone": "0812345678",
-                    "created_date": datetime.now().strftime("%Y-%m-%d"),
-                    "status": "active"
-                },
-                {
-                    "student_id": "ZLS102",
-                    "fullname": "สมหญิง เก่งเรียน",
-                    "email": "somying@example.com",
-                    "phone": "0823456789",
-                    "created_date": datetime.now().strftime("%Y-%m-%d"),
-                    "status": "active"
-                },
-                {
-                    "student_id": "ZLS103",
-                    "fullname": "นักศึกษา ตัวอย่าง",
-                    "email": "student@example.com",
-                    "phone": "0834567890",
-                    "created_date": datetime.now().strftime("%Y-%m-%d"),
-                    "status": "active"
-                }
-            ]
-            students_df = pd.DataFrame(sample_students)
-            students_df.to_excel(f"{data_folder}/students.xlsx", index=False)
-    except:
-        pass
+    # Initialize Google Sheets (สร้างหากยังไม่มี)
+    if gc:
+        try:
+            # สร้างชีทหลักหากไม่มี
+            spreadsheet = get_or_create_spreadsheet("ZL_TA_Learning_DB")
+            
+            # ตรวจสอบและสร้างชีทต่างๆ หากไม่มี
+            required_sheets = ["students", "courses", "admin", "students_check", "teachers", "student_courses"]
+            
+            for sheet_name in required_sheets:
+                try:
+                    spreadsheet.worksheet(sheet_name)
+                except gspread.WorksheetNotFound:
+                    # สร้างชีทใหม่
+                    worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
+                    
+                    # กำหนดคอลัมน์เริ่มต้นตามประเภทของชีท
+                    if sheet_name == "students":
+                        headers = ["student_id", "fullname", "email", "phone", "created_date", "status"]
+                    elif sheet_name == "courses":
+                        headers = ["course_id", "course_name", "teacher_id", "teacher_name", "description", 
+                                 "image_path", "jitsi_room", "max_students", "current_students", 
+                                 "class_type", "status", "security_code", "created_date"]
+                    elif sheet_name == "admin":
+                        headers = ["teacher_id", "username", "password_hash", "fullname", "email", 
+                                 "created_at", "role"]
+                    elif sheet_name == "students_check":
+                        headers = ["check_id", "student_id", "fullname", "check_date", "check_time", 
+                                 "attendance_count", "status"]
+                    elif sheet_name == "teachers":
+                        headers = ["teacher_id", "username", "password_hash", "fullname", "email", 
+                                 "phone", "created_at", "role", "status"]
+                    elif sheet_name == "student_courses":
+                        headers = ["enrollment_id", "student_id", "fullname", "course_id", "course_name",
+                                 "enrollment_date", "completion_status", "completion_date", "certificate_issued"]
+                    else:
+                        headers = []
+                    
+                    if headers:
+                        worksheet.append_row(headers)
+            
+            # เพิ่มข้อมูลตัวอย่างหากไม่มีข้อมูล
+            students_df = get_sheet_data("students")
+            if students_df.empty:
+                # เพิ่มนักเรียนตัวอย่าง
+                sample_students = [
+                    ["ZLS101", "สมชาย ใจดี", "somchai@example.com", "0812345678", 
+                     datetime.now().strftime("%Y-%m-%d"), "active"],
+                    ["ZLS102", "สมหญิง เก่งเรียน", "somying@example.com", "0823456789", 
+                     datetime.now().strftime("%Y-%m-%d"), "active"],
+                    ["ZLS103", "นักศึกษา ตัวอย่าง", "student@example.com", "0834567890", 
+                     datetime.now().strftime("%Y-%m-%d"), "active"]
+                ]
+                
+                for student in sample_students:
+                    append_to_sheet("students", student)
+            
+            # เพิ่มครูตัวอย่างหากไม่มี
+            admin_df = get_sheet_data("admin")
+            if admin_df.empty:
+                # เพิ่มครูตัวอย่าง (รหัสผ่าน: teacher123)
+                sample_teacher = ["T001", "teacher", md5("teacher123"), "ครูตัวอย่าง", 
+                                "teacher@example.com", datetime.now().strftime("%Y-%m-%d"), "teacher"]
+                append_to_sheet("admin", sample_teacher)
+                
+        except Exception as e:
+            st.warning(f"เกิดข้อผิดพลาดในการเตรียม Google Sheets: {e}")
 
 def md5(text):
     """Create MD5 hash"""
     return hashlib.md5(text.encode()).hexdigest()
 
-def check_student_id(student_id):
-    """ตรวจสอบสิทธิ์นักเรียนด้วย ID"""
-    try:
-        students_df = pd.read_excel("data/students.xlsx")
-        student_info = students_df[students_df["student_id"] == student_id.upper()]
-        
-        if not student_info.empty:
-            student = student_info.iloc[0]
-            
-            # บันทึกการตรวจสอบสิทธิ์ลงไฟล์ students_check.xlsx
-            check_df = pd.read_excel("save_data/students_check.xlsx")
-            
-            # นับจำนวนครั้งที่เคยเข้าเรียน
-            attendance_count = 0
-            if not check_df.empty and "student_id" in check_df.columns:
-                student_checks = check_df[check_df["student_id"] == student_id.upper()]
-                attendance_count = len(student_checks) if not student_checks.empty else 0
-            
-            # บันทึกข้อมูลใหม่ (APPEND เท่านั้น)
-            new_check = {
-                "check_id": f"CHK{int(time.time())}",
-                "student_id": student_id.upper(),
-                "fullname": student["fullname"],
-                "check_date": datetime.now().strftime("%Y-%m-%d"),
-                "check_time": datetime.now().strftime("%H:%M:%S"),
-                "attendance_count": attendance_count + 1,
-                "status": "verified"
-            }
-            
-            # เพิ่มข้อมูลใหม่โดยไม่ลบข้อมูลเก่า
-            check_df = pd.concat([check_df, pd.DataFrame([new_check])], ignore_index=True)
-            check_df.to_excel("save_data/students_check.xlsx", index=False)
-            
-            return True, student["fullname"], student["email"]
-        else:
-            return False, None, None
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการตรวจสอบรหัสนักเรียน: {e}")
-        return False, None, None
-
-def get_student_courses(student_id):
-    """ดึงคอร์สที่นักเรียนลงทะเบียน"""
-    try:
-        df = pd.read_excel("save_data/student_courses.xlsx")
-        if not df.empty and "student_id" in df.columns:
-            return df[df["student_id"] == student_id]
-        return pd.DataFrame()
-    except:
-        return pd.DataFrame()
-
-def enroll_student_in_course(student_id, student_name, course_id, course_name):
-    """ลงทะเบียนนักเรียนในคอร์ส"""
-    try:
-        df = pd.read_excel("save_data/student_courses.xlsx")
-        
-        # ตรวจสอบว่าลงทะเบียนแล้วหรือยัง
-        already_enrolled = df[
-            (df["student_id"] == student_id) & 
-            (df["course_id"] == course_id)
-        ].shape[0] > 0
-        
-        if not already_enrolled:
-            new_enrollment = {
-                "enrollment_id": f"ENR{int(time.time())}",
-                "student_id": student_id,
-                "fullname": student_name,
-                "course_id": course_id,
-                "course_name": course_name,
-                "enrollment_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "completion_status": False,
-                "completion_date": None,
-                "certificate_issued": False
-            }
-            
-            df = pd.concat([df, pd.DataFrame([new_enrollment])], ignore_index=True)
-            df.to_excel("save_data/student_courses.xlsx", index=False)
-            return True
-        return False
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการลงทะเบียน: {e}")
-        return False
-
-def mark_course_completed(student_id, course_id):
-    """บันทึกสถานะเรียนจบคอร์ส"""
-    try:
-        df = pd.read_excel("save_data/student_courses.xlsx")
-        
-        # ค้นหาและอัปเดต
-        mask = (df["student_id"] == student_id) & (df["course_id"] == course_id)
-        if mask.any():
-            df.loc[mask, "completion_status"] = True
-            df.loc[mask, "completion_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            df.to_excel("save_data/student_courses.xlsx", index=False)
-            return True
-        return False
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
-        return False
-
 def get_course_lessons(course_id):
-    """ดึงบทเรียนของคอร์ส"""
+    """ดึงบทเรียนของคอร์ส (ยังใช้ JSON)"""
     lesson_file = f"save_data/lessons/{course_id}_lessons.json"
     if os.path.exists(lesson_file):
         try:
@@ -922,7 +1097,7 @@ def get_course_lessons(course_id):
     return []
 
 def get_course_exercises(course_id):
-    """ดึงแบบฝึกหัดของคอร์ส"""
+    """ดึงแบบฝึกหัดของคอร์ส (ยังใช้ JSON)"""
     exercise_file = f"save_data/lessons/{course_id}_exercises.json"
     if os.path.exists(exercise_file):
         try:
@@ -933,7 +1108,7 @@ def get_course_exercises(course_id):
     return []
 
 def save_quiz_result(student_id, course_id, lesson_index, exercise_index, answer, is_correct):
-    """บันทึกผลแบบฝึกหัด"""
+    """บันทึกผลแบบฝึกหัด (ยังใช้ JSON)"""
     try:
         quiz_file = f"save_data/quiz_results/{student_id}_{course_id}.json"
         
@@ -979,7 +1154,7 @@ def save_quiz_result(student_id, course_id, lesson_index, exercise_index, answer
         return False
 
 def get_quiz_results(student_id, course_id):
-    """ดึงผลแบบฝึกหัด"""
+    """ดึงผลแบบฝึกหัด (ยังใช้ JSON)"""
     quiz_file = f"save_data/quiz_results/{student_id}_{course_id}.json"
     if os.path.exists(quiz_file):
         try:
@@ -1080,55 +1255,8 @@ def save_exercise_image(course_id, exercise_index, image_file):
     except Exception as e:
         return False, str(e)
 
-def teacher_login(username, password):
-    """ตรวจสอบการเข้าสู่ระบบครูผู้สอน"""
-    try:
-        admin_df = pd.read_excel("data/admin.xlsx")
-        
-        if not admin_df.empty:
-            user_record = admin_df[admin_df["username"] == username]
-            
-            if not user_record.empty:
-                teacher = user_record.iloc[0]
-                password_hash = md5(password)
-                
-                if teacher["password_hash"] == password_hash:
-                    # บันทึกใน teachers.xlsx (สำรอง)
-                    try:
-                        teachers_df = pd.read_excel("save_data/teachers.xlsx")
-                        login_record = {
-                            "teacher_id": teacher["teacher_id"],
-                            "username": username,
-                            "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "status": "success"
-                        }
-                        teachers_df = pd.concat([teachers_df, pd.DataFrame([login_record])], ignore_index=True)
-                        teachers_df.to_excel("save_data/teachers.xlsx", index=False)
-                    except:
-                        pass
-                    
-                    return True, "เข้าสู่ระบบสำเร็จ!", teacher["teacher_id"], teacher["fullname"]
-                else:
-                    return False, "รหัสผ่านไม่ถูกต้อง", None, None
-            else:
-                return False, "ไม่พบบัญชีผู้ใช้งาน", None, None
-        else:
-            return False, "ไม่มีข้อมูลในระบบ", None, None
-    except Exception as e:
-        return False, f"เกิดข้อผิดพลาด: {e}", None, None
-
-def get_teacher_courses(teacher_id):
-    """ดึงคอร์สของครูผู้สอน"""
-    try:
-        courses_df = pd.read_excel("data/courses.xlsx")
-        if not courses_df.empty and "teacher_id" in courses_df.columns:
-            return courses_df[courses_df["teacher_id"] == teacher_id]
-        return pd.DataFrame()
-    except:
-        return pd.DataFrame()
-
 def save_lesson(course_id, lesson_data):
-    """บันทึกบทเรียน"""
+    """บันทึกบทเรียน (ยังใช้ JSON)"""
     try:
         lesson_file = f"save_data/lessons/{course_id}_lessons.json"
         
@@ -1149,7 +1277,7 @@ def save_lesson(course_id, lesson_data):
         return False
 
 def save_exercise(course_id, exercise_data):
-    """บันทึกแบบฝึกหัด"""
+    """บันทึกแบบฝึกหัด (ยังใช้ JSON)"""
     try:
         exercise_file = f"save_data/lessons/{course_id}_exercises.json"
         
@@ -1172,7 +1300,7 @@ def save_exercise(course_id, exercise_data):
 def save_document(course_id, file, filename):
     """บันทึกเอกสารประกอบ"""
     try:
-        # แก้ไข: แปลง course_id เป็น string ถ้ามันเป็น float
+        # แก้ไข: แปลง course_id เป็น string
         if isinstance(course_id, float):
             course_id = str(int(course_id)) if course_id.is_integer() else str(course_id)
         elif not isinstance(course_id, str):
@@ -1195,7 +1323,7 @@ def create_certificate(student_id, student_name, course_id, course_name, teacher
         cert_folder = "save_data/certificates"
         os.makedirs(cert_folder, exist_ok=True)
         
-        # Convert course_id to string if it's float
+        # Convert course_id to string
         if isinstance(course_id, float):
             course_id = str(int(course_id)) if course_id.is_integer() else str(course_id)
         elif not isinstance(course_id, str):
@@ -1203,7 +1331,7 @@ def create_certificate(student_id, student_name, course_id, course_name, teacher
             
         cert_path = f"{cert_folder}/{student_id}_{course_id}_certificate.txt"
         
-        # สร้างไฟล์ใบรับรองแบบข้อความ (ในระบบจริงควรใช้ PDF)
+        # สร้างไฟล์ใบรับรองแบบข้อความ
         with open(cert_path, "w", encoding="utf-8") as f:
             f.write("="*60 + "\n")
             f.write("          ใบรับรองการเรียนจบ\n")
@@ -1222,9 +1350,9 @@ def create_certificate(student_id, student_name, course_id, course_name, teacher
         return False, str(e)
 
 def check_teacher_credentials(username, password):
-    """ตรวจสอบข้อมูลครู"""
+    """ตรวจสอบข้อมูลครู (Google Sheets)"""
     try:
-        admin_df = pd.read_excel("data/admin.xlsx")
+        admin_df = get_sheet_data("admin")
         if not admin_df.empty:
             user = admin_df[admin_df["username"] == username]
             if not user.empty:
@@ -1283,16 +1411,6 @@ def save_uploaded_certificate(student_id, course_id, file, filename):
         return True, file_path
     except Exception as e:
         return False, str(e)
-
-def get_available_courses():
-    """ดึงคอร์สทั้งหมดที่เปิดสอน"""
-    try:
-        courses_df = pd.read_excel("data/courses.xlsx")
-        if not courses_df.empty:
-            return courses_df
-        return pd.DataFrame()
-    except:
-        return pd.DataFrame()
 
 # Initialize data folder
 init_data_folder()
@@ -1392,7 +1510,7 @@ elif st.session_state.page == "student_home" and st.session_state.role == "stude
         
         # Get attendance count
         try:
-            check_df = pd.read_excel("save_data/students_check.xlsx")
+            check_df = get_sheet_data("students_check")
             student_checks = check_df[check_df["student_id"] == st.session_state.student_id]
             attendance_count = len(student_checks) if not student_checks.empty else 0
             st.write(f"**📊 เข้าเรียนแล้ว:** {attendance_count} ครั้ง")
@@ -1503,7 +1621,7 @@ elif st.session_state.page == "student_home" and st.session_state.role == "stude
                                 if is_enrolled:
                                     if st.button("🎥 เข้าเรียนสด", key=f"live_home_{course_id}_{idx}", use_container_width=True):
                                         try:
-                                            courses_df = pd.read_excel("data/courses.xlsx")
+                                            courses_df = get_sheet_data("courses")
                                             if course_id:
                                                 course_info = courses_df[courses_df["course_id"] == course_id]
                                                 if not course_info.empty:
@@ -1558,7 +1676,7 @@ elif st.session_state.page == "student_home" and st.session_state.role == "stude
                     
                     # Try to get course details
                     try:
-                        courses_df = pd.read_excel("data/courses.xlsx")
+                        courses_df = get_sheet_data("courses")
                         course_details = courses_df[courses_df["course_id"] == course_id]
                         
                         if not course_details.empty:
@@ -1578,7 +1696,7 @@ elif st.session_state.page == "student_home" and st.session_state.role == "stude
                     with col_btn1:
                         if st.button("🎥 เข้าเรียน", key=f"go_live_{course_id}", use_container_width=True):
                             try:
-                                courses_df = pd.read_excel("data/courses.xlsx")
+                                courses_df = get_sheet_data("courses")
                                 if course_id:
                                     course_info = courses_df[courses_df["course_id"] == course_id]
                                     if not course_info.empty:
@@ -2155,8 +2273,7 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         col1, col2, col3 = st.columns(3)
         
         try:
-            courses_df = pd.read_excel("data/courses.xlsx")
-            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+            my_courses = get_teacher_courses(st.session_state.teacher_id)
             num_courses = len(my_courses)
         except:
             num_courses = 0
@@ -2173,7 +2290,7 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         
         with col2:
             try:
-                student_courses_df = pd.read_excel("save_data/student_courses.xlsx")
+                student_courses_df = get_sheet_data("student_courses")
                 teacher_course_ids = my_courses["course_id"].tolist() if not my_courses.empty else []
                 teacher_students = student_courses_df[student_courses_df["course_id"].isin(teacher_course_ids)] if not student_courses_df.empty else pd.DataFrame()
                 enrolled_students = teacher_students["student_id"].nunique() if not teacher_students.empty else 0
@@ -2247,8 +2364,7 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         st.markdown("---")
         
         try:
-            courses_df = pd.read_excel("data/courses.xlsx")
-            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+            my_courses = get_teacher_courses(st.session_state.teacher_id)
             
             if not my_courses.empty:
                 for idx, row in my_courses.iterrows():
@@ -2347,7 +2463,7 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
                     st.error("กรุณากรอกข้อมูลที่จำเป็น (*)")
                 else:
                     try:
-                        courses_df = pd.read_excel("data/courses.xlsx")
+                        courses_df = get_sheet_data("courses")
                         
                         # Generate course ID
                         course_id = f"C{len(courses_df) + 1:04d}"
@@ -2364,7 +2480,7 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
                                 st.warning(f"ไม่สามารถบันทึกรูปภาพ: {e}")
                                 img_path = ""
                         
-                        # Add course
+                        # Create course data
                         new_course = {
                             "course_id": course_id,
                             "course_name": course_name,
@@ -2381,28 +2497,21 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
                             "created_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         }
                         
-                        courses_df = pd.concat([courses_df, pd.DataFrame([new_course])], ignore_index=True)
-                        courses_df.to_excel("data/courses.xlsx", index=False)
+                        # Save to Google Sheets
+                        success = create_new_course(new_course)
                         
-                        # Create lesson file
-                        lesson_file = f"save_data/lessons/{course_id}_lessons.json"
-                        with open(lesson_file, "w", encoding="utf-8") as f:
-                            json.dump([], f)
-                        
-                        # Create exercises file
-                        exercise_file = f"save_data/lessons/{course_id}_exercises.json"
-                        with open(exercise_file, "w", encoding="utf-8") as f:
-                            json.dump([], f)
-                        
-                        st.success(f"✅ **สร้างคอร์ส '{course_name}' สำเร็จ!**")
-                        st.info(f"**รหัสคอร์ส:** {course_id}")
-                        st.info(f"**รหัสความปลอดภัย:** {security_code}")
-                        st.info(f"**ห้อง Jitsi:** {jitsi_room}")
-                        
-                        # Auto redirect after 3 seconds
-                        time.sleep(3)
-                        st.session_state.page = "teacher_dashboard"
-                        st.rerun()
+                        if success:
+                            st.success(f"✅ **สร้างคอร์ส '{course_name}' สำเร็จ!**")
+                            st.info(f"**รหัสคอร์ส:** {course_id}")
+                            st.info(f"**รหัสความปลอดภัย:** {security_code}")
+                            st.info(f"**ห้อง Jitsi:** {jitsi_room}")
+                            
+                            # Auto redirect after 3 seconds
+                            time.sleep(3)
+                            st.session_state.page = "teacher_dashboard"
+                            st.rerun()
+                        else:
+                            st.error("เกิดข้อผิดพลาดในการสร้างคอร์ส")
                     except Exception as e:
                         st.error(f"เกิดข้อผิดพลาด: {e}")
     
@@ -2412,8 +2521,7 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         st.markdown("---")
         
         try:
-            courses_df = pd.read_excel("data/courses.xlsx")
-            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+            my_courses = get_teacher_courses(st.session_state.teacher_id)
             
             if not my_courses.empty:
                 selected_course = st.selectbox(
@@ -2543,8 +2651,7 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         st.markdown("---")
         
         try:
-            courses_df = pd.read_excel("data/courses.xlsx")
-            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+            my_courses = get_teacher_courses(st.session_state.teacher_id)
             
             if not my_courses.empty:
                 selected_course = st.selectbox(
@@ -2654,8 +2761,7 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         st.markdown("---")
         
         try:
-            courses_df = pd.read_excel("data/courses.xlsx")
-            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+            my_courses = get_teacher_courses(st.session_state.teacher_id)
             
             if not my_courses.empty:
                 selected_course = st.selectbox(
@@ -2729,11 +2835,11 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
                     with col_complete:
                         if st.button("ประกาศเรียนจบ", type="primary", key="mark_completed", use_container_width=True):
                             try:
-                                student_courses_df = pd.read_excel("save_data/student_courses.xlsx")
+                                student_courses_df = get_sheet_data("student_courses")
                                 mask = student_courses_df["course_id"] == course_info["course_id"]
                                 student_courses_df.loc[mask, "completion_status"] = True
                                 student_courses_df.loc[mask, "completion_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                student_courses_df.to_excel("save_data/student_courses.xlsx", index=False)
+                                update_sheet_data("student_courses", student_courses_df)
                                 
                                 st.success("✅ **ประกาศเรียนจบคอร์สเรียบร้อย!**")
                                 st.rerun()
@@ -2743,11 +2849,11 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
                     with col_cancel:
                         if st.button("ยกเลิก", type="secondary", key="cancel_completion", use_container_width=True):
                             try:
-                                student_courses_df = pd.read_excel("save_data/student_courses.xlsx")
+                                student_courses_df = get_sheet_data("student_courses")
                                 mask = student_courses_df["course_id"] == course_info["course_id"]
                                 student_courses_df.loc[mask, "completion_status"] = False
                                 student_courses_df.loc[mask, "completion_date"] = None
-                                student_courses_df.to_excel("save_data/student_courses.xlsx", index=False)
+                                update_sheet_data("student_courses", student_courses_df)
                                 
                                 st.warning("⚠️ **ยกเลิกการประกาศเรียนจบเรียบร้อย**")
                                 st.rerun()
@@ -2779,8 +2885,7 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         st.markdown("---")
         
         try:
-            courses_df = pd.read_excel("data/courses.xlsx")
-            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+            my_courses = get_teacher_courses(st.session_state.teacher_id)
             
             if not my_courses.empty:
                 selected_course = st.selectbox(
@@ -2844,8 +2949,7 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         st.markdown("---")
         
         try:
-            courses_df = pd.read_excel("data/courses.xlsx")
-            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+            my_courses = get_teacher_courses(st.session_state.teacher_id)
         
             if not my_courses.empty:
                 selected_course = st.selectbox(
@@ -2856,7 +2960,7 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
                 course_id = my_courses[my_courses["course_name"] == selected_course]["course_id"].iloc[0]
                 
                 # Get students who completed this course
-                student_courses_df = pd.read_excel("save_data/student_courses.xlsx")
+                student_courses_df = get_sheet_data("student_courses")
                 completed_students = student_courses_df[
                     (student_courses_df["course_id"] == course_id) & 
                     (student_courses_df["completion_status"] == True)
@@ -2893,8 +2997,8 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
                                         st.success("✅ **อัปโหลดใบรับรองสำเร็จ!**")
                                         
                                         # Update student record
-                                        student_courses_df.loc[idx, "certificate_issued"] = True
-                                        student_courses_df.to_excel("save_data/student_courses.xlsx", index=False)
+                                        updates = {"certificate_issued": True}
+                                        update_sheet_row("student_courses", "enrollment_id", student['enrollment_id'], updates)
                                         
                                         st.rerun()
                                     else:
@@ -2932,8 +3036,7 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         st.markdown("---")
         
         try:
-            courses_df = pd.read_excel("data/courses.xlsx")
-            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+            my_courses = get_teacher_courses(st.session_state.teacher_id)
             
             if not my_courses.empty:
                 selected_course = st.selectbox(
@@ -3126,16 +3229,15 @@ elif st.session_state.page == "edit_course" and st.session_state.role == "teache
                     st.error("กรุณากรอกข้อมูลที่จำเป็น (*)")
                 else:
                     try:
-                        courses_df = pd.read_excel("data/courses.xlsx")
-                        
-                        # Find and update course
-                        mask = courses_df["course_id"] == course_info["course_id"]
-                        courses_df.loc[mask, "course_name"] = course_name
-                        courses_df.loc[mask, "class_type"] = class_type
-                        courses_df.loc[mask, "max_students"] = max_students
-                        courses_df.loc[mask, "jitsi_room"] = jitsi_room
-                        courses_df.loc[mask, "description"] = description
-                        courses_df.loc[mask, "status"] = status
+                        # Prepare updates
+                        updates = {
+                            "course_name": course_name,
+                            "class_type": class_type,
+                            "max_students": max_students,
+                            "jitsi_room": jitsi_room,
+                            "description": description,
+                            "status": status
+                        }
                         
                         # Update image if new one uploaded
                         if image:
@@ -3144,16 +3246,20 @@ elif st.session_state.page == "edit_course" and st.session_state.role == "teache
                                 os.makedirs(os.path.dirname(img_path), exist_ok=True)
                                 with open(img_path, "wb") as f:
                                     f.write(image.getbuffer())
-                                courses_df.loc[mask, "image_path"] = img_path
+                                updates["image_path"] = img_path
                             except Exception as e:
                                 st.warning(f"ไม่สามารถบันทึกรูปภาพ: {e}")
                         
-                        courses_df.to_excel("data/courses.xlsx", index=False)
+                        # Update in Google Sheets
+                        success = update_course(course_info["course_id"], updates)
                         
-                        st.success("✅ **บันทึกการแก้ไขสำเร็จ!**")
-                        time.sleep(1)
-                        st.session_state.page = "teacher_dashboard"
-                        st.rerun()
+                        if success:
+                            st.success("✅ **บันทึกการแก้ไขสำเร็จ!**")
+                            time.sleep(1)
+                            st.session_state.page = "teacher_dashboard"
+                            st.rerun()
+                        else:
+                            st.error("เกิดข้อผิดพลาดในการบันทึก")
                     except Exception as e:
                         st.error(f"เกิดข้อผิดพลาด: {e}")
     else:
@@ -3171,7 +3277,7 @@ elif st.session_state.page == "manage_lessons" and st.session_state.role == "tea
         course_id = st.session_state.current_course
         
         # Get course details
-        courses_df = pd.read_excel("data/courses.xlsx")
+        courses_df = get_sheet_data("courses")
         course_info = courses_df[courses_df["course_id"] == course_id].iloc[0]
         
         st.write(f"**คอร์ส:** {course_info['course_name']}")
@@ -3186,7 +3292,6 @@ elif st.session_state.page == "manage_lessons" and st.session_state.role == "tea
             for i, lesson in enumerate(lessons):
                 with st.expander(f"บทที่ {i+1}: {lesson.get('title', 'ไม่มีชื่อ')}"):
                     # เอาส่วนเนื้อหาออกตามข้อ 4
-                    # st.write(f"**เนื้อหา:** {lesson.get('content', '')[:200]}...")
                     
                     col1, col2 = st.columns(2)
                     with col1:
@@ -3259,6 +3364,7 @@ elif st.session_state.page == "manage_lessons" and st.session_state.role == "tea
         st.error(f"เกิดข้อผิดพลาด: {e}")
         st.session_state.page = "teacher_dashboard"
         st.rerun()
+
 # -----------------------------
 # Main App Runner
 # -----------------------------
@@ -3267,5 +3373,4 @@ if __name__ == "__main__":
     if st.session_state.get("debug", False):
         st.sidebar.write(f"Page: {st.session_state.page}")
         st.sidebar.write(f"Role: {st.session_state.role}")
-
         st.sidebar.write(f"Jitsi Connected: {st.session_state.jitsi_connected}")
