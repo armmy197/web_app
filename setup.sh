@@ -13,6 +13,7 @@ mkdir -p data save_data save_data/images save_data/documents save_data/certifica
 python -c "
 import pandas as pd
 import os
+from datetime import datetime
 
 # สร้างไฟล์ students.xlsx
 df_students = pd.DataFrame(columns=['student_id', 'fullname', 'email', 'phone', 'created_date', 'status'])
@@ -58,5 +59,4 @@ df_student_courses.to_excel('save_data/student_courses.xlsx', index=False)
 print('Initial setup completed!')
 "
 
-# ให้สิทธิ์ในการรัน
-chmod +x setup.sh
+echo "Setup completed successfully!"
