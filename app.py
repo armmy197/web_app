@@ -594,53 +594,34 @@ if logo_base64:
 def init_google_sheets():
     """Initialize Google Sheets connection"""
     try:
-        # For deployment, use Streamlit secrets
+        # For deployment on Streamlit Cloud
         if 'GOOGLE_CREDENTIALS' in st.secrets:
-            # Get credentials from Streamlit secrets
-            credentials_dict = dict(st.secrets['GOOGLE_CREDENTIALS'])
+            import json
+            # Parse JSON credentials from secrets
+            credentials_info = json.loads(st.secrets['GOOGLE_CREDENTIALS'])
+            
             credentials = Credentials.from_service_account_info(
-                credentials_dict,
+                credentials_info,
                 scopes=[
                     'https://www.googleapis.com/auth/spreadsheets',
-                    'https://www.googleapis.com/auth/drive'
+                    'https://www.googleapis.com/auth/drive.readonly'
                 ]
             )
+            
+            # Create clients
+            gc = gspread.authorize(credentials)
+            drive_service = build('drive', 'v3', credentials=credentials)
+            
+            st.sidebar.success("✅ เชื่อมต่อ Google Sheets สำเร็จ!")
+            return gc, drive_service
         else:
-            # For local development, use service account file
-            creds_file = 'credentials.json'
-            if os.path.exists(creds_file):
-                credentials = Credentials.from_service_account_file(
-                    creds_file,
-                    scopes=[
-                        'https://www.googleapis.com/auth/spreadsheets',
-                        'https://www.googleapis.com/auth/drive'
-                    ]
-                )
-            else:
-                st.error("กรุณาตั้งค่า Google Cloud Credentials")
-                st.info("""
-                **วิธีตั้งค่า:**
-                1. สร้าง Service Account ใน Google Cloud Console
-                2. เปิดใช้งาน Google Sheets API และ Google Drive API
-                3. ดาวน์โหลดไฟล์ credentials.json
-                4. วางไฟล์ credentials.json ในโฟลเดอร์โปรเจค
-                หรือตั้งค่าใน Streamlit Secrets
-                """)
-                return None, None
-        
-        # Create clients
-        gc = gspread.authorize(credentials)
-        drive_service = build('drive', 'v3', credentials=credentials)
-        
-        st.success("✅ เชื่อมต่อ Google Sheets สำเร็จ!")
-        return gc, drive_service
+            st.warning("⚠️ ไม่พบ Google Sheets credentials")
+            st.info("กรุณาตั้งค่าใน Streamlit Secrets")
+            return None, None
+            
     except Exception as e:
         st.error(f"❌ เกิดข้อผิดพลาดในการเชื่อมต่อ Google Sheets: {str(e)}")
         return None, None
-
-# Initialize Google Sheets connection
-gc, drive_service = init_google_sheets()
-
 # -----------------------------
 # Google Sheets Helper Functions
 # -----------------------------
@@ -3566,3 +3547,4 @@ if __name__ == "__main__":
         if st.session_state.last_backup_time:
             last_backup_str = time.strftime('%H:%M:%S', time.localtime(st.session_state.last_backup_time))
             st.sidebar.info(f"🕒 Backup ล่าสุด: {last_backup_str}")
+
