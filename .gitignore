@@ -13,98 +13,47 @@ eggs/
 lib/
 lib64/
 parts/
-sdk/
+sdist/
 var/
 wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# Environments
-.env
-.venv
-env/
+# Virtual Environment
 venv/
+env/
 ENV/
 env.bak/
 venv.bak/
-
-# Streamlit
-.streamlit/
-
-# Data files
-data/
-save_data/
-images_logo/
-*.xlsx
-*.json
-*.txt
-*.pdf
-*.doc
-*.docx
-*.ppt
-*.pptx
-*.jpg
-*.jpeg
-*.png
-*.gif
-
-# Secrets
-secrets.toml
-.devcontainer/
-*.pem
-*.key
-*.crt
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
-# Temporary files
-*.tmp
-*.temp
+# Streamlit
+.streamlit/
+
+# Data files
+save_data/
+credentials.json
+*.pem
+*.key
+*.p12
+
+# Environment variables
+.env
+secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Logs
 *.log
+
+# Temp files
+*.tmp
+*.temp
