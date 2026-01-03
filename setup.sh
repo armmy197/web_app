@@ -11,7 +11,13 @@ apt-get install -y \
     python3-dev \
     libxml2-dev \
     libxslt1-dev \
-    zlib1g-dev
+    zlib1g-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libtiff-dev \
+    libfreetype6-dev \
+    liblcms2-dev \
+    libwebp-dev
 
 # Upgrade pip, setuptools, and wheel
 pip install --upgrade pip setuptools wheel
