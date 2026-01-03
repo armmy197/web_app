@@ -1,18 +1,21 @@
 #!/bin/bash
 
-# อัปเดตแพ็คเกจระบบ
+# Update system packages
 apt-get update
+apt-get upgrade -y
 
-# ติดตั้ง dependencies ของระบบสำหรับ Google Sheets
-apt-get install -y build-essential libssl-dev libffi-dev python3-dev
+# Install system dependencies
+apt-get install -y \
+    build-essential \
+    libssl-dev \
+    libffi-dev \
+    python3-dev \
+    libjpeg-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    liblzma-dev
 
-# อัปเกรด pip
-pip install --upgrade pip
-
-# ติดตั้งแพ็คเกจ Python
-pip install --no-cache-dir -r requirements.txt
-
-# สร้างไดเรกทอรีที่จำเป็น
+# Create necessary directories
 mkdir -p save_data/images
 mkdir -p save_data/documents
 mkdir -p save_data/certificates
@@ -20,3 +23,8 @@ mkdir -p save_data/exercise_images
 mkdir -p save_data/lessons
 mkdir -p save_data/quiz_results
 mkdir -p save_data/certificates_files
+mkdir -p images_logo
+
+# Install Python packages
+pip install --upgrade pip
+pip install --no-cache-dir -r requirements.txt
