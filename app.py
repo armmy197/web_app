@@ -648,20 +648,11 @@ if "student_registration_open" not in st.session_state:
 
 # -----------------------------
 # Security Configuration
-# -----------------------------
-# Environment variables สำหรับความปลอดภัย
-import os
-from dotenv import load_dotenv
+# ----------------------------
 
-# โหลด environment variables ถ้ามีไฟล์ .env
-try:
-    load_dotenv()
-except:
-    pass
-
-# กำหนดค่าตั้งต้นสำหรับ environment variables
-SECRET_KEY = os.environ.get("SECRET_KEY", "your-secret-key-change-in-production")
-ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", "your-encryption-key-32-chars")
+# ใช้ค่า default โดยตรง
+SECRET_KEY = "your-secret-key-change-in-production"
+ENCRYPTION_KEY = "your-encryption-key-32-chars"
 
 # -----------------------------
 # Database Functions (SQLite แทน Excel)
@@ -3530,4 +3521,5 @@ if __name__ == "__main__":
     if st.session_state.get("debug", False):
         st.sidebar.write(f"Page: {st.session_state.page}")
         st.sidebar.write(f"Role: {st.session_state.role}")
+
         st.sidebar.write(f"Jitsi Connected: {st.session_state.jitsi_connected}")
