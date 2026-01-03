@@ -1,0 +1,18 @@
+# Environment variables
+.env
+*.env
+.env.local
+
+# Database
+database.db
+*.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# VS Code
+.vscode/
