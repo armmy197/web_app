@@ -3259,7 +3259,6 @@ elif st.session_state.page == "manage_lessons" and st.session_state.role == "tea
         st.error(f"เกิดข้อผิดพลาด: {e}")
         st.session_state.page = "teacher_dashboard"
         st.rerun()
-
 # -----------------------------
 # Main App Runner
 # -----------------------------
@@ -3268,4 +3267,5 @@ if __name__ == "__main__":
     if st.session_state.get("debug", False):
         st.sidebar.write(f"Page: {st.session_state.page}")
         st.sidebar.write(f"Role: {st.session_state.role}")
+
         st.sidebar.write(f"Jitsi Connected: {st.session_state.jitsi_connected}")
