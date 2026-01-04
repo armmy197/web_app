@@ -23,6 +23,76 @@ st.set_page_config(
 )
 
 # -----------------------------
+# AUTO-LOAD REAL DATA
+# -----------------------------
+def auto_load_real_data():
+    """โหลดข้อมูลจริงอัตโนมัติ"""
+    
+    data_loaded = False
+    
+    # ลองโหลดจาก private_data/ ก่อน
+    private_files = {
+        "students": "private_data/students_real.xlsx",
+        "courses": "private_data/courses_real.xlsx", 
+        "admin": "private_data/admin_real.xlsx"
+    }
+    
+    for data_type, file_path in private_files.items():
+        if os.path.exists(file_path):
+            try:
+                df = pd.read_excel(file_path)
+                if data_type == "students":
+                    st.session_state.current_students = df
+                elif data_type == "courses":
+                    st.session_state.current_courses = df
+                elif data_type == "admin":
+                    st.session_state.current_admin = df
+                print(f"✅ โหลดข้อมูล {data_type} จาก {file_path}")
+                data_loaded = True
+            except Exception as e:
+                print(f"❌ เกิดข้อผิดพลาดโหลด {file_path}: {e}")
+    
+    # ถ้าไม่มีข้อมูลจริง ให้ใช้ตัวอย่าง
+    if not data_loaded:
+        print("⚠️ ใช้ข้อมูลตัวอย่าง")
+        load_sample_data()
+
+def load_sample_data():
+    """โหลดข้อมูลตัวอย่าง"""
+    # สร้างข้อมูลนักเรียนตัวอย่าง
+    sample_students = pd.DataFrame({
+        "student_id": ["ZLS001", "ZLS002", "ZLS003"],
+        "fullname": ["นักเรียนตัวอย่าง 1", "นักเรียนตัวอย่าง 2", "นักเรียนตัวอย่าง 3"],
+        "email": ["sample1@email.com", "sample2@email.com", "sample3@email.com"],
+        "phone": ["0811111111", "0822222222", "0833333333"],
+        "status": ["active", "active", "active"]
+    })
+    
+    # สร้างข้อมูลคอร์สตัวอย่าง
+    sample_courses = pd.DataFrame({
+        "course_id": ["C001", "C002"],
+        "course_name": ["คณิตศาสตร์พื้นฐาน", "ภาษาอังกฤษเบื้องต้น"],
+        "teacher_id": ["T001", "T002"],
+        "teacher_name": ["ครูสมชาย", "ครูสมหญิง"],
+        "description": ["คอร์สคณิตศาสตร์", "คอร์สภาษาอังกฤษ"],
+        "class_type": ["กลุ่ม", "กลุ่ม"]
+    })
+    
+    # สร้างข้อมูลครูตัวอย่าง
+    sample_admin = pd.DataFrame({
+        "teacher_id": ["T001", "T002"],
+        "username": ["teacher1", "teacher2"],
+        "password_hash": ["482c811da5d5b4bc6d497ffa98491e38", "482c811da5d5b4bc6d497ffa98491e38"],
+        "fullname": ["ครูสมชาย", "ครูสมหญิง"],
+        "email": ["teacher1@email.com", "teacher2@email.com"],
+        "role": ["teacher", "teacher"]
+    })
+    
+    st.session_state.current_students = sample_students
+    st.session_state.current_courses = sample_courses
+    st.session_state.current_admin = sample_admin
+
+# -----------------------------
 # CSS - ออกแบบใหม่ตามโทนสีที่กำหนด
 # -----------------------------
 # Function to encode logo image
@@ -745,6 +815,9 @@ if "students_check_df" not in st.session_state:
     st.session_state.students_check_df = None
 if "teachers_df" not in st.session_state:
     st.session_state.teachers_df = None
+
+# เรียกใช้ฟังก์ชันโหลดข้อมูล
+auto_load_real_data()
 
 # -----------------------------
 # Helper Functions
@@ -2391,7 +2464,8 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
             "📤 อัปโหลดเอกสาร", 
             "🎓 ออกใบรับรอง", 
             "🔗 สร้างลิงก์เรียน",
-            "💾 บันทึกและดาวน์โหลดข้อมูล"
+            "💾 บันทึกและดาวน์โหลดข้อมูล",
+            "💾 จัดการข้อมูลจริง"
         ]
         
         menu_choice = st.radio("**เมนูครูผู้สอน**", menu_options, key="teacher_menu")
@@ -3729,6 +3803,105 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
             st.success("✅ รีเซ็ตข้อมูลใน Session เรียบร้อย")
             st.info("ข้อมูลจะถูกโหลดใหม่จากไฟล์ในเครื่องเมื่อต้องการใช้งาน")
             st.rerun()
+
+    # ---------- จัดการข้อมูลจริง ----------
+    elif menu_choice == "💾 จัดการข้อมูลจริง":
+        st.title("💾 จัดการข้อมูลจริง")
+        st.markdown("---")
+        
+        tab1, tab2, tab3 = st.tabs(["📥 นำเข้าข้อมูล", "📤 ส่งออกข้อมูล", "⚙️ การตั้งค่า"])
+        
+        with tab1:
+            st.subheader("นำเข้าข้อมูลจริงจากไฟล์ Excel")
+            
+            uploaded_file = st.file_uploader(
+                "เลือกไฟล์ Excel (.xlsx) ที่มีข้อมูลจริง",
+                type=["xlsx"],
+                key="import_real_data"
+            )
+            
+            if uploaded_file:
+                try:
+                    df = pd.read_excel(uploaded_file)
+                    
+                    # ตรวจสอบประเภทข้อมูล
+                    if "student_id" in df.columns:
+                        # บันทึกเป็นข้อมูลนักเรียนจริง
+                        save_path = "private_data/students_real.xlsx"
+                        os.makedirs("private_data", exist_ok=True)
+                        df.to_excel(save_path, index=False)
+                        st.session_state.current_students = df
+                        st.success(f"✅ นำเข้าข้อมูลนักเรียน {len(df)} คน")
+                        
+                    elif "course_id" in df.columns:
+                        # บันทึกเป็นข้อมูลคอร์สจริง
+                        save_path = "private_data/courses_real.xlsx"
+                        os.makedirs("private_data", exist_ok=True)
+                        df.to_excel(save_path, index=False)
+                        st.session_state.current_courses = df
+                        st.success(f"✅ นำเข้าข้อมูลคอร์ส {len(df)} คอร์ส")
+                        
+                    elif "teacher_id" in df.columns:
+                        # บันทึกเป็นข้อมูลครูจริง
+                        save_path = "private_data/admin_real.xlsx"
+                        os.makedirs("private_data", exist_ok=True)
+                        df.to_excel(save_path, index=False)
+                        st.session_state.current_admin = df
+                        st.success(f"✅ นำเข้าข้อมูลครู {len(df)} คน")
+                        
+                except Exception as e:
+                    st.error(f"เกิดข้อผิดพลาด: {e}")
+        
+        with tab2:
+            st.subheader("ส่งออกข้อมูลจริง")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button("📥 ดาวน์โหลดข้อมูลนักเรียน", use_container_width=True):
+                    if st.session_state.current_students is not None:
+                        csv = st.session_state.current_students.to_csv(index=False)
+                        st.download_button(
+                            label="คลิกเพื่อดาวน์โหลด",
+                            data=csv,
+                            file_name="students_real_data.csv",
+                            mime="text/csv"
+                        )
+            
+            with col2:
+                if st.button("📥 ดาวน์โหลดข้อมูลคอร์ส", use_container_width=True):
+                    if st.session_state.current_courses is not None:
+                        csv = st.session_state.current_courses.to_csv(index=False)
+                        st.download_button(
+                            label="คลิกเพื่อดาวน์โหลด",
+                            data=csv,
+                            file_name="courses_real_data.csv",
+                            mime="text/csv"
+                        )
+            
+            with col3:
+                if st.button("📥 ดาวน์โหลดข้อมูลครู", use_container_width=True):
+                    if st.session_state.current_admin is not None:
+                        csv = st.session_state.current_admin.to_csv(index=False)
+                        st.download_button(
+                            label="คลิกเพื่อดาวน์โหลด",
+                            data=csv,
+                            file_name="teachers_real_data.csv",
+                            mime="text/csv"
+                        )
+        
+        with tab3:
+            st.subheader("การตั้งค่าการเก็บข้อมูล")
+            
+            st.info("""
+            **ข้อมูลจริงจะถูกเก็บใน:** `private_data/`
+            **ข้อมูลตัวอย่างจะถูกเก็บใน:** `sample_data/`
+            
+            **คำแนะนำ:**
+            1. สำรองข้อมูลจริงก่อนอัปโหลดโค้ดขึ้น GitHub
+            2. ใช้ข้อมูลตัวอย่างสำหรับการพัฒนา
+            3. ข้อมูลจริงเก็บไว้ในเครื่องเท่านั้น
+            """)
 
 # -----------------------------
 # EDIT LESSON PAGE
