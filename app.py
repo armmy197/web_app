@@ -5,61 +5,13 @@ import hashlib
 import os
 import json
 import time
+from pathlib import Path
 import uuid
 import base64
 from PIL import Image
 import io
-
-# Firebase Imports
-import firebase_admin
-from firebase_admin import credentials, firestore, storage
-from google.cloud.firestore_v1.base_query import FieldFilter
-
-# -----------------------------
-# Firebase Initialization
-# -----------------------------
-def init_firebase():
-    """Initialize Firebase with credentials from Streamlit secrets"""
-    try:
-        if not firebase_admin._apps:
-            # Load configuration from secrets
-            firebase_config = {
-                "type": st.secrets.get("FIREBASE_TYPE", "service_account"),
-                "project_id": st.secrets["FIREBASE_PROJECT_ID"],
-                "private_key_id": st.secrets.get("FIREBASE_PRIVATE_KEY_ID", ""),
-                "private_key": st.secrets["FIREBASE_PRIVATE_KEY"].replace('\\n', '\n'),
-                "client_email": st.secrets["FIREBASE_CLIENT_EMAIL"],
-                "client_id": st.secrets.get("FIREBASE_CLIENT_ID", ""),
-                "auth_uri": st.secrets.get("FIREBASE_AUTH_URI", "https://accounts.google.com/o/oauth2/auth"),
-                "token_uri": st.secrets.get("FIREBASE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
-                "auth_provider_x509_cert_url": st.secrets.get("FIREBASE_AUTH_PROVIDER_X509_CERT_URL", "https://www.googleapis.com/oauth2/v1/certs"),
-                "client_x509_cert_url": st.secrets.get("FIREBASE_CLIENT_X509_CERT_URL", ""),
-                "universe_domain": st.secrets.get("FIREBASE_UNIVERSE_DOMAIN", "googleapis.com")
-            }
-            
-            cred = credentials.Certificate(firebase_config)
-            firebase_admin.initialize_app(cred, {
-                'storageBucket': f"{st.secrets['FIREBASE_PROJECT_ID']}.appspot.com"
-            })
-        
-        return firestore.client()
-    except Exception as e:
-        st.error(f"❌ Firebase initialization failed: {str(e)}")
-        st.error("โปรดตรวจสอบ Secrets configuration")
-        return None
-
-# Initialize Firestore
-try:
-    db = init_firebase()
-    if db:
-        bucket = storage.bucket()
-        st.sidebar.success("✅ Firebase Connected")
-    else:
-        st.error("❌ Could not initialize Firebase. Please check your secrets.")
-        st.stop()
-except Exception as e:
-    st.error(f"❌ Firebase Error: {e}")
-    st.stop()
+import warnings
+warnings.filterwarnings('ignore')
 
 # -----------------------------
 # Page config
@@ -179,6 +131,33 @@ footer {{visibility: hidden;}}
     transform: translateY(-5px);
     box-shadow: 0 8px 25px rgba(0,0,0,0.15);
     border-color: var(--sub-title);
+}}
+
+/* File Upload Styling */
+.upload-success {{
+    background: #E8F5E9;
+    border: 2px solid #4CAF50;
+    border-radius: 8px;
+    padding: 10px;
+    margin: 10px 0;
+}}
+
+.upload-warning {{
+    background: #FFF3CD;
+    border: 2px solid #FFC107;
+    border-radius: 8px;
+    padding: 10px;
+    margin: 10px 0;
+}}
+
+.data-preview {{
+    background: #F8F9FA;
+    border: 2px solid #DEE2E6;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 10px 0;
+    max-height: 300px;
+    overflow-y: auto;
 }}
 
 /* Course Grid */
@@ -622,6 +601,62 @@ footer {{visibility: hidden;}}
     background: #FFEBEE;
     border-color: #EF9A9A;
 }}
+
+/* Upload Section Styles */
+.upload-section {{
+    background: #F8F9FA;
+    border: 2px dashed #6C757D;
+    border-radius: 10px;
+    padding: 30px;
+    margin: 20px 0;
+    text-align: center;
+}}
+
+.upload-section:hover {{
+    border-color: var(--main-title);
+    background: #E9ECEF;
+}}
+
+.upload-icon {{
+    font-size: 48px;
+    color: #6C757D;
+    margin-bottom: 15px;
+}}
+
+.file-info-card {{
+    background: white;
+    border: 2px solid #DEE2E6;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 10px 0;
+}}
+
+.file-info-card h5 {{
+    color: var(--main-title);
+    margin-bottom: 10px;
+}}
+
+.template-card {{
+    background: linear-gradient(135deg, var(--primary-color), #B3E5FC);
+    border: 2px solid #81D4FA;
+    border-radius: 10px;
+    padding: 20px;
+    margin: 10px;
+    text-align: center;
+    transition: all 0.3s ease;
+}}
+
+.template-card:hover {{
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    border-color: var(--main-title);
+}}
+
+.template-icon {{
+    font-size: 36px;
+    color: var(--main-title);
+    margin-bottom: 10px;
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -634,7 +669,7 @@ if logo_base64:
     """, unsafe_allow_html=True)
 
 # -----------------------------
-# Session State
+# Session State Initialization
 # -----------------------------
 if "role" not in st.session_state:
     st.session_state.role = None
@@ -691,424 +726,279 @@ if "show_solution" not in st.session_state:
 if "show_lessons" not in st.session_state:
     st.session_state.show_lessons = True
 
+# ข้อมูลที่อัปโหลด (Excel ดิบ)
+if "uploaded_students" not in st.session_state:
+    st.session_state.uploaded_students = None
+if "uploaded_courses" not in st.session_state:
+    st.session_state.uploaded_courses = None
+if "uploaded_admin" not in st.session_state:
+    st.session_state.uploaded_admin = None
+if "current_students" not in st.session_state:
+    st.session_state.current_students = None
+if "current_courses" not in st.session_state:
+    st.session_state.current_courses = None
+if "current_admin" not in st.session_state:
+    st.session_state.current_admin = None
+if "student_courses_df" not in st.session_state:
+    st.session_state.student_courses_df = None
+if "students_check_df" not in st.session_state:
+    st.session_state.students_check_df = None
+if "teachers_df" not in st.session_state:
+    st.session_state.teachers_df = None
+
 # -----------------------------
-# Firebase Helper Functions
+# Helper Functions
 # -----------------------------
+def init_data_folder():
+    """Initialize data folder and required files"""
+    # Create main data folder
+    data_folder = "data"
+    os.makedirs(data_folder, exist_ok=True)
+    
+    # Create save_data folder
+    save_data = "save_data"
+    os.makedirs(save_data, exist_ok=True)
+    
+    # Create images folder
+    os.makedirs(f"{save_data}/images", exist_ok=True)
+    
+    # Create documents folder
+    os.makedirs(f"{save_data}/documents", exist_ok=True)
+    
+    # Create certificates folder
+    os.makedirs(f"{save_data}/certificates", exist_ok=True)
+    
+    # Create exercise_images folder
+    os.makedirs(f"{save_data}/exercise_images", exist_ok=True)
+    
+    # ============================================
+    # STUDENT DATA FILES (data/)
+    # ============================================
+    
+    # 1. students.xlsx - ข้อมูลผู้เรียน
+    if not os.path.exists(f"{data_folder}/students.xlsx"):
+        df_students = pd.DataFrame(columns=[
+            "student_id", 
+            "fullname", 
+            "email", 
+            "phone", 
+            "created_date", 
+            "status"
+        ])
+        df_students.to_excel(f"{data_folder}/students.xlsx", index=False)
+    
+    # 2. courses.xlsx - ข้อมูลคอร์สเรียน
+    if not os.path.exists(f"{data_folder}/courses.xlsx"):
+        df_courses = pd.DataFrame(columns=[
+            "course_id",
+            "course_name", 
+            "teacher_id",
+            "teacher_name",
+            "description",
+            "image_path",
+            "jitsi_room",
+            "max_students",
+            "current_students",
+            "class_type",
+            "status",
+            "security_code",
+            "created_date"
+        ])
+        df_courses.to_excel(f"{data_folder}/courses.xlsx", index=False)
+    
+    # 3. admin.xlsx - ข้อมูลครู/ผู้ดูแล
+    if not os.path.exists(f"{data_folder}/admin.xlsx"):
+        df_admin = pd.DataFrame(columns=[
+            "teacher_id",
+            "username",
+            "password_hash",
+            "fullname",
+            "email",
+            "created_at",
+            "role"
+        ])
+        df_admin.to_excel(f"{data_folder}/admin.xlsx", index=False)
+        
+    # ============================================
+    # CHECK AND TEACHER DATA FILES (save_data/)
+    # ============================================
+    
+    # 4. students_check.xlsx - ประวัติการเข้าเรียน
+    if not os.path.exists(f"{save_data}/students_check.xlsx"):
+        df_check = pd.DataFrame(columns=[
+            "check_id",
+            "student_id", 
+            "fullname",
+            "check_date",
+            "check_time",
+            "attendance_count",
+            "status"
+        ])
+        df_check.to_excel(f"{save_data}/students_check.xlsx", index=False)
+    
+    # 5. teachers.xlsx - ข้อมูลครู (สำรอง)
+    if not os.path.exists(f"{save_data}/teachers.xlsx"):
+        df_teachers = pd.DataFrame(columns=[
+            "teacher_id",
+            "username",
+            "password_hash",
+            "fullname",
+            "email",
+            "phone",
+            "created_at",
+            "role",
+            "status"
+        ])
+        df_teachers.to_excel(f"{save_data}/teachers.xlsx", index=False)
+    
+    # 6. student_courses.xlsx - การลงทะเบียนคอร์ส
+    if not os.path.exists(f"{save_data}/student_courses.xlsx"):
+        df_student_courses = pd.DataFrame(columns=[
+            "enrollment_id",
+            "student_id", 
+            "fullname",
+            "course_id", 
+            "course_name",
+            "enrollment_date",
+            "completion_status",
+            "completion_date",
+            "certificate_issued"
+        ])
+        df_student_courses.to_excel(f"{save_data}/student_courses.xlsx", index=False)
+    
+    # Create lessons folder
+    os.makedirs(f"{save_data}/lessons", exist_ok=True)
+    
+    # Create quiz results folder
+    os.makedirs(f"{save_data}/quiz_results", exist_ok=True)
+    
+    # Create certificates_files folder for uploaded certificates
+    os.makedirs(f"{save_data}/certificates_files", exist_ok=True)
+
 def md5(text):
     """Create MD5 hash"""
     return hashlib.md5(text.encode()).hexdigest()
 
-def upload_file_to_storage(file_bytes, destination_path, content_type=None):
-    """Upload file to Firebase Storage"""
-    try:
-        blob = bucket.blob(destination_path)
-        blob.upload_from_string(file_bytes, content_type=content_type)
-        blob.make_public()
-        return blob.public_url
-    except Exception as e:
-        st.error(f"Error uploading file: {e}")
-        return None
+def get_students_data():
+    """ดึงข้อมูลนักเรียน (จาก session state หรือไฟล์)"""
+    if st.session_state.current_students is not None and not st.session_state.current_students.empty:
+        return st.session_state.current_students
+    else:
+        try:
+            return pd.read_excel("data/students.xlsx")
+        except:
+            return pd.DataFrame()
 
-def download_file_from_storage(storage_path, local_path):
-    """Download file from Firebase Storage"""
-    try:
-        blob = bucket.blob(storage_path)
-        blob.download_to_filename(local_path)
-        return local_path
-    except Exception as e:
-        st.error(f"Error downloading file: {e}")
-        return None
+def get_courses_data():
+    """ดึงข้อมูลคอร์ส (จาก session state หรือไฟล์)"""
+    if st.session_state.current_courses is not None and not st.session_state.current_courses.empty:
+        return st.session_state.current_courses
+    else:
+        try:
+            return pd.read_excel("data/courses.xlsx")
+        except:
+            return pd.DataFrame()
 
-# -----------------------------
-# Firestore CRUD Operations
-# -----------------------------
+def get_admin_data():
+    """ดึงข้อมูลครู (จาก session state หรือไฟล์)"""
+    if st.session_state.current_admin is not None and not st.session_state.current_admin.empty:
+        return st.session_state.current_admin
+    else:
+        try:
+            return pd.read_excel("data/admin.xlsx")
+        except:
+            return pd.DataFrame()
 
-def get_student(student_id):
-    """Get student by ID"""
-    try:
-        doc_ref = db.collection('students').document(student_id.upper())
-        doc = doc_ref.get()
-        return doc.to_dict() if doc.exists else None
-    except Exception as e:
-        st.error(f"Error getting student: {e}")
-        return None
+def get_student_check_data():
+    """ดึงข้อมูลตรวจสอบนักเรียน"""
+    if st.session_state.students_check_df is not None and not st.session_state.students_check_df.empty:
+        return st.session_state.students_check_df
+    else:
+        try:
+            return pd.read_excel("save_data/students_check.xlsx")
+        except:
+            return pd.DataFrame()
 
-def add_student(student_data):
-    """Add new student"""
-    try:
-        doc_ref = db.collection('students').document(student_data['student_id'])
-        doc_ref.set(student_data)
-        return student_data['student_id']
-    except Exception as e:
-        st.error(f"Error adding student: {e}")
-        return None
+def get_student_courses_data():
+    """ดึงข้อมูลการลงทะเบียนคอร์ส"""
+    if st.session_state.student_courses_df is not None and not st.session_state.student_courses_df.empty:
+        return st.session_state.student_courses_df
+    else:
+        try:
+            return pd.read_excel("save_data/student_courses.xlsx")
+        except:
+            return pd.DataFrame()
 
-def get_all_students():
-    """Get all students"""
-    try:
-        docs = db.collection('students').stream()
-        return [doc.to_dict() for doc in docs]
-    except Exception as e:
-        st.error(f"Error getting all students: {e}")
-        return []
-
-def get_course(course_id):
-    """Get course by ID"""
-    try:
-        doc_ref = db.collection('courses').document(str(course_id))
-        doc = doc_ref.get()
-        return doc.to_dict() if doc.exists else None
-    except Exception as e:
-        st.error(f"Error getting course: {e}")
-        return None
-
-def get_courses_by_teacher(teacher_id):
-    """Get courses by teacher"""
-    try:
-        query = db.collection('courses').where(filter=FieldFilter('teacher_id', '==', teacher_id))
-        docs = query.stream()
-        return [doc.to_dict() for doc in docs]
-    except Exception as e:
-        st.error(f"Error getting teacher courses: {e}")
-        return []
-
-def get_all_courses():
-    """Get all courses"""
-    try:
-        docs = db.collection('courses').stream()
-        return [doc.to_dict() for doc in docs]
-    except Exception as e:
-        st.error(f"Error getting all courses: {e}")
-        return []
-
-def add_course(course_data):
-    """Add new course"""
-    try:
-        doc_ref = db.collection('courses').document(course_data['course_id'])
-        doc_ref.set(course_data)
-        return course_data['course_id']
-    except Exception as e:
-        st.error(f"Error adding course: {e}")
-        return None
-
-def update_course(course_id, updates):
-    """Update course data"""
-    try:
-        doc_ref = db.collection('courses').document(str(course_id))
-        doc_ref.update(updates)
-        return True
-    except Exception as e:
-        st.error(f"Error updating course: {e}")
-        return False
-
-def get_teacher_by_username(username):
-    """Get teacher by username"""
-    try:
-        query = db.collection('teachers').where(filter=FieldFilter('username', '==', username))
-        docs = query.stream()
-        for doc in docs:
-            return doc.to_dict()
-        return None
-    except Exception as e:
-        st.error(f"Error getting teacher: {e}")
-        return None
-
-def add_teacher(teacher_data):
-    """Add new teacher"""
-    try:
-        doc_ref = db.collection('teachers').document(teacher_data['teacher_id'])
-        doc_ref.set(teacher_data)
-        return teacher_data['teacher_id']
-    except Exception as e:
-        st.error(f"Error adding teacher: {e}")
-        return None
-
-def add_student_check(check_data):
-    """Add student attendance check"""
-    try:
-        doc_ref = db.collection('student_checks').document(check_data['check_id'])
-        doc_ref.set(check_data)
-        return check_data['check_id']
-    except Exception as e:
-        st.error(f"Error adding student check: {e}")
-        return None
-
-def get_student_checks(student_id):
-    """Get student attendance history"""
-    try:
-        query = db.collection('student_checks').where(filter=FieldFilter('student_id', '==', student_id))
-        docs = query.stream()
-        return [doc.to_dict() for doc in docs]
-    except Exception as e:
-        st.error(f"Error getting student checks: {e}")
-        return []
-
-def enroll_student(enrollment_data):
-    """Enroll student in course"""
-    try:
-        enrollment_id = f"ENR{int(time.time())}"
-        enrollment_data['enrollment_id'] = enrollment_id
-        doc_ref = db.collection('enrollments').document(enrollment_id)
-        doc_ref.set(enrollment_data)
-        return enrollment_id
-    except Exception as e:
-        st.error(f"Error enrolling student: {e}")
-        return None
-
-def get_student_enrollments(student_id):
-    """Get student's enrollments"""
-    try:
-        query = db.collection('enrollments').where(filter=FieldFilter('student_id', '==', student_id))
-        docs = query.stream()
-        return [doc.to_dict() for doc in docs]
-    except Exception as e:
-        st.error(f"Error getting enrollments: {e}")
-        return []
-
-def update_enrollment(enrollment_id, updates):
-    """Update enrollment status"""
-    try:
-        doc_ref = db.collection('enrollments').document(enrollment_id)
-        doc_ref.update(updates)
-        return True
-    except Exception as e:
-        st.error(f"Error updating enrollment: {e}")
-        return False
-
-def get_lessons(course_id):
-    """Get lessons for a course"""
-    try:
-        query = db.collection('lessons').where(filter=FieldFilter('course_id', '==', str(course_id)))
-        docs = query.stream()
-        lessons = []
-        for doc in docs:
-            lesson = doc.to_dict()
-            lesson['id'] = doc.id
-            lessons.append(lesson)
-        
-        # Sort by order if exists
-        if lessons and 'order' in lessons[0]:
-            lessons.sort(key=lambda x: x.get('order', 999))
-        else:
-            lessons.sort(key=lambda x: x.get('created_at', ''))
-        
-        return lessons
-    except Exception as e:
-        st.error(f"Error getting lessons: {e}")
-        return []
-
-def add_lesson(lesson_data):
-    """Add new lesson"""
-    try:
-        doc_ref = db.collection('lessons').document()
-        lesson_id = doc_ref.id
-        lesson_data['id'] = lesson_id
-        doc_ref.set(lesson_data)
-        return lesson_id
-    except Exception as e:
-        st.error(f"Error adding lesson: {e}")
-        return None
-
-def update_lesson(lesson_id, updates):
-    """Update lesson"""
-    try:
-        doc_ref = db.collection('lessons').document(lesson_id)
-        doc_ref.update(updates)
-        return True
-    except Exception as e:
-        st.error(f"Error updating lesson: {e}")
-        return False
-
-def get_exercises(course_id):
-    """Get exercises for a course"""
-    try:
-        query = db.collection('exercises').where(filter=FieldFilter('course_id', '==', str(course_id)))
-        docs = query.stream()
-        exercises_by_lesson = {}
-        
-        for doc in docs:
-            exercise = doc.to_dict()
-            exercise['id'] = doc.id
-            lesson_index = exercise.get('lesson_index', 0)
-            
-            if lesson_index not in exercises_by_lesson:
-                exercises_by_lesson[lesson_index] = {
-                    "lesson_index": lesson_index,
-                    "exercises": []
-                }
-            
-            exercises_by_lesson[lesson_index]["exercises"].append(exercise)
-        
-        # Convert to list and sort by lesson_index
-        result = []
-        for lesson_index in sorted(exercises_by_lesson.keys()):
-            # Sort exercises within each lesson
-            exercises_by_lesson[lesson_index]["exercises"].sort(
-                key=lambda x: x.get('exercise_index', 999)
-            )
-            result.append(exercises_by_lesson[lesson_index])
-        
-        return result
-    except Exception as e:
-        st.error(f"Error getting exercises: {e}")
-        return []
-
-def add_exercise(exercise_data):
-    """Add new exercise"""
-    try:
-        doc_ref = db.collection('exercises').document()
-        exercise_id = doc_ref.id
-        exercise_data['id'] = exercise_id
-        doc_ref.set(exercise_data)
-        return exercise_id
-    except Exception as e:
-        st.error(f"Error adding exercise: {e}")
-        return None
-
-def save_quiz_result_fb(quiz_data):
-    """Save quiz result to Firebase"""
-    try:
-        quiz_id = f"{quiz_data['student_id']}_{quiz_data['course_id']}_{quiz_data['lesson_index']}_{quiz_data['exercise_index']}"
-        quiz_data['quiz_id'] = quiz_id
-        doc_ref = db.collection('quiz_results').document(quiz_id)
-        doc_ref.set(quiz_data)
-        return quiz_id
-    except Exception as e:
-        st.error(f"Error saving quiz result: {e}")
-        return None
-
-def get_student_quiz_results(student_id, course_id):
-    """Get quiz results for a student in a course"""
-    try:
-        query = db.collection('quiz_results').where(filter=FieldFilter('student_id', '==', student_id)).where(filter=FieldFilter('course_id', '==', str(course_id)))
-        docs = query.stream()
-        return [doc.to_dict() for doc in docs]
-    except Exception as e:
-        st.error(f"Error getting quiz results: {e}")
-        return []
-
-def add_document(document_data):
-    """Add document"""
-    try:
-        doc_ref = db.collection('documents').document()
-        document_id = doc_ref.id
-        document_data['id'] = document_id
-        doc_ref.set(document_data)
-        return document_id
-    except Exception as e:
-        st.error(f"Error adding document: {e}")
-        return None
-
-def get_course_documents_fb(course_id):
-    """Get documents for a course"""
-    try:
-        query = db.collection('documents').where(filter=FieldFilter('course_id', '==', str(course_id)))
-        docs = query.stream()
-        return [doc.to_dict() for doc in docs]
-    except Exception as e:
-        st.error(f"Error getting documents: {e}")
-        return []
-
-def add_certificate(certificate_data):
-    """Add certificate"""
-    try:
-        doc_ref = db.collection('certificates').document()
-        cert_id = doc_ref.id
-        certificate_data['id'] = cert_id
-        doc_ref.set(certificate_data)
-        return cert_id
-    except Exception as e:
-        st.error(f"Error adding certificate: {e}")
-        return None
-
-def get_student_certificates(student_id, course_id=None):
-    """Get certificates for a student"""
-    try:
-        if course_id:
-            query = db.collection('certificates').where(filter=FieldFilter('student_id', '==', student_id)).where(filter=FieldFilter('course_id', '==', str(course_id)))
-        else:
-            query = db.collection('certificates').where(filter=FieldFilter('student_id', '==', student_id))
-        
-        docs = query.stream()
-        return [doc.to_dict() for doc in docs]
-    except Exception as e:
-        st.error(f"Error getting certificates: {e}")
-        return []
-
-# -----------------------------
-# Application Helper Functions (Adapted for Firebase)
-# -----------------------------
 def check_student_id(student_id):
     """ตรวจสอบสิทธิ์นักเรียนด้วย ID"""
     try:
-        student = get_student(student_id.upper())
+        students_df = get_students_data()
         
-        if student:
-            # บันทึกการตรวจสอบสิทธิ์
-            attendance_records = get_student_checks(student_id.upper())
-            attendance_count = len(attendance_records)
+        if not students_df.empty:
+            student_info = students_df[students_df["student_id"] == student_id.upper()]
             
-            check_data = {
-                "check_id": f"CHK{int(time.time())}",
-                "student_id": student_id.upper(),
-                "fullname": student["fullname"],
-                "check_date": datetime.now().strftime("%Y-%m-%d"),
-                "check_time": datetime.now().strftime("%H:%M:%S"),
-                "attendance_count": attendance_count + 1,
-                "status": "verified"
-            }
-            
-            add_student_check(check_data)
-            
-            return True, student["fullname"], student.get("email", "")
+            if not student_info.empty:
+                student = student_info.iloc[0]
+                
+                # บันทึกการตรวจสอบสิทธิ์
+                check_df = get_student_check_data()
+                
+                # นับจำนวนครั้งที่เคยเข้าเรียน
+                attendance_count = 0
+                if not check_df.empty and "student_id" in check_df.columns:
+                    student_checks = check_df[check_df["student_id"] == student_id.upper()]
+                    attendance_count = len(student_checks) if not student_checks.empty else 0
+                
+                # บันทึกข้อมูลใหม่
+                new_check = {
+                    "check_id": f"CHK{int(time.time())}",
+                    "student_id": student_id.upper(),
+                    "fullname": student["fullname"],
+                    "check_date": datetime.now().strftime("%Y-%m-%d"),
+                    "check_time": datetime.now().strftime("%H:%M:%S"),
+                    "attendance_count": attendance_count + 1,
+                    "status": "verified"
+                }
+                
+                # เพิ่มข้อมูลใหม่
+                check_df = pd.concat([check_df, pd.DataFrame([new_check])], ignore_index=True)
+                
+                # บันทึกทั้งใน session state และไฟล์
+                st.session_state.students_check_df = check_df
+                check_df.to_excel("save_data/students_check.xlsx", index=False)
+                
+                return True, student["fullname"], student["email"]
+            else:
+                return False, None, None
         else:
             return False, None, None
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการตรวจสอบรหัสนักเรียน: {e}")
         return False, None, None
 
-def teacher_login(username, password):
-    """ตรวจสอบการเข้าสู่ระบบครูผู้สอน"""
-    try:
-        password_hash = md5(password)
-        teacher = get_teacher_by_username(username)
-        
-        if teacher and teacher.get('password_hash') == password_hash:
-            return True, "เข้าสู่ระบบสำเร็จ!", teacher["teacher_id"], teacher["fullname"]
-        else:
-            return False, "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง", None, None
-    except Exception as e:
-        return False, f"เกิดข้อผิดพลาด: {e}", None, None
-
-def get_student_courses_fb(student_id):
+def get_student_courses(student_id):
     """ดึงคอร์สที่นักเรียนลงทะเบียน"""
     try:
-        enrollments = get_student_enrollments(student_id)
-        
-        # Get course details for each enrollment
-        courses = []
-        for enrollment in enrollments:
-            course = get_course(enrollment['course_id'])
-            if course:
-                course.update(enrollment)
-                courses.append(course)
-        
-        return courses
-    except Exception as e:
-        st.error(f"Error getting student courses: {e}")
-        return []
+        df = get_student_courses_data()
+        if not df.empty and "student_id" in df.columns:
+            return df[df["student_id"] == student_id]
+        return pd.DataFrame()
+    except:
+        return pd.DataFrame()
 
-def enroll_student_in_course_fb(student_id, student_name, course_id, course_name):
+def enroll_student_in_course(student_id, student_name, course_id, course_name):
     """ลงทะเบียนนักเรียนในคอร์ส"""
     try:
-        # Check if already enrolled
-        enrollments = get_student_enrollments(student_id)
-        already_enrolled = any(
-            e['course_id'] == course_id for e in enrollments
-        )
+        df = get_student_courses_data()
+        
+        # ตรวจสอบว่าลงทะเบียนแล้วหรือยัง
+        already_enrolled = df[
+            (df["student_id"] == student_id) & 
+            (df["course_id"] == course_id)
+        ].shape[0] > 0
         
         if not already_enrolled:
-            enrollment_data = {
+            new_enrollment = {
                 "enrollment_id": f"ENR{int(time.time())}",
                 "student_id": student_id,
                 "fullname": student_name,
@@ -1120,217 +1010,117 @@ def enroll_student_in_course_fb(student_id, student_name, course_id, course_name
                 "certificate_issued": False
             }
             
-            enroll_student(enrollment_data)
+            df = pd.concat([df, pd.DataFrame([new_enrollment])], ignore_index=True)
+            
+            # บันทึกทั้งใน session state และไฟล์
+            st.session_state.student_courses_df = df
+            df.to_excel("save_data/student_courses.xlsx", index=False)
+            
             return True
         return False
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการลงทะเบียน: {e}")
         return False
 
-def mark_course_completed_fb(student_id, course_id):
+def mark_course_completed(student_id, course_id):
     """บันทึกสถานะเรียนจบคอร์ส"""
     try:
-        enrollments = get_student_enrollments(student_id)
-        for enrollment in enrollments:
-            if enrollment['course_id'] == course_id:
-                enrollment_id = enrollment.get('enrollment_id', enrollment.get('id'))
-                if enrollment_id:
-                    update_enrollment(enrollment_id, {
-                        "completion_status": True,
-                        "completion_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    })
-                    return True
+        df = get_student_courses_data()
+        
+        # ค้นหาและอัปเดต
+        mask = (df["student_id"] == student_id) & (df["course_id"] == course_id)
+        if mask.any():
+            df.loc[mask, "completion_status"] = True
+            df.loc[mask, "completion_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # บันทึกทั้งใน session state และไฟล์
+            st.session_state.student_courses_df = df
+            df.to_excel("save_data/student_courses.xlsx", index=False)
+            
+            return True
         return False
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการบันทึก: {e}")
         return False
 
-def get_course_lessons_fb(course_id):
+def get_course_lessons(course_id):
     """ดึงบทเรียนของคอร์ส"""
-    return get_lessons(course_id)
+    lesson_file = f"save_data/lessons/{course_id}_lessons.json"
+    if os.path.exists(lesson_file):
+        try:
+            with open(lesson_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
 
-def get_course_exercises_fb(course_id):
+def get_course_exercises(course_id):
     """ดึงแบบฝึกหัดของคอร์ส"""
-    return get_exercises(course_id)
+    exercise_file = f"save_data/lessons/{course_id}_exercises.json"
+    if os.path.exists(exercise_file):
+        try:
+            with open(exercise_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
 
-def save_quiz_result_fb_wrapper(student_id, course_id, lesson_index, exercise_index, answer, is_correct):
+def save_quiz_result(student_id, course_id, lesson_index, exercise_index, answer, is_correct):
     """บันทึกผลแบบฝึกหัด"""
     try:
-        quiz_data = {
-            "student_id": student_id,
-            "course_id": str(course_id),
-            "lesson_index": lesson_index,
-            "exercise_index": exercise_index,
-            "answer": answer,
-            "is_correct": is_correct,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
+        quiz_file = f"save_data/quiz_results/{student_id}_{course_id}.json"
         
-        save_quiz_result_fb(quiz_data)
+        if os.path.exists(quiz_file):
+            with open(quiz_file, "r", encoding="utf-8") as f:
+                quiz_data = json.load(f)
+        else:
+            quiz_data = []
+        
+        # Check if already answered this exercise
+        for i, item in enumerate(quiz_data):
+            if (item["lesson_index"] == lesson_index and 
+                item["exercise_index"] == exercise_index):
+                # Update existing answer
+                quiz_data[i] = {
+                    "student_id": student_id,
+                    "course_id": course_id,
+                    "lesson_index": lesson_index,
+                    "exercise_index": exercise_index,
+                    "answer": answer,
+                    "is_correct": is_correct,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                break
+        else:
+            # Add new answer
+            quiz_data.append({
+                "student_id": student_id,
+                "course_id": course_id,
+                "lesson_index": lesson_index,
+                "exercise_index": exercise_index,
+                "answer": answer,
+                "is_correct": is_correct,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+        
+        with open(quiz_file, "w", encoding="utf-8") as f:
+            json.dump(quiz_data, f, ensure_ascii=False, indent=2)
+        
         return True
     except Exception as e:
         st.error(f"Error saving quiz result: {e}")
         return False
 
-def save_lesson_fb(course_id, lesson_data):
-    """บันทึกบทเรียน"""
-    try:
-        lesson_data['course_id'] = str(course_id)
-        lesson_data['created_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        lesson_data['order'] = len(get_lessons(course_id)) + 1
-        
-        add_lesson(lesson_data)
-        return True
-    except Exception as e:
-        st.error(f"Error saving lesson: {e}")
-        return False
-
-def save_exercise_fb(course_id, exercise_data):
-    """บันทึกแบบฝึกหัด"""
-    try:
-        # Handle the new exercise format
-        lesson_index = exercise_data.get("lesson_index", 0)
-        exercises_list = exercise_data.get("exercises", [])
-        
-        if exercises_list:
-            for i, exercise in enumerate(exercises_list):
-                exercise_data_full = {
-                    "course_id": str(course_id),
-                    "lesson_index": lesson_index,
-                    "exercise_index": i,
-                    "question": exercise.get("question", ""),
-                    "answer": exercise.get("answer", ""),
-                    "image_path": exercise.get("image_path", ""),
-                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-                
-                add_exercise(exercise_data_full)
-        
-        return True
-    except Exception as e:
-        st.error(f"Error saving exercise: {e}")
-        return False
-
-def save_document_fb(course_id, file, filename):
-    """บันทึกเอกสารประกอบ"""
-    try:
-        # Upload to Firebase Storage
-        file_bytes = file.getvalue()
-        storage_path = f"documents/{course_id}/{filename}"
-        file_url = upload_file_to_storage(file_bytes, storage_path)
-        
-        if not file_url:
-            return False, "Upload failed"
-        
-        # Save metadata to Firestore
-        document_data = {
-            "course_id": str(course_id),
-            "filename": filename,
-            "storage_path": storage_path,
-            "url": file_url,
-            "uploaded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "size": len(file_bytes)
-        }
-        
-        add_document(document_data)
-        return True, file_url
-    except Exception as e:
-        return False, str(e)
-
-def get_course_documents_fb_wrapper(course_id):
-    """ดึงรายการเอกสารในคอร์ส"""
-    documents = get_course_documents_fb(course_id)
-    result = []
-    for doc in documents:
-        result.append({
-            "name": doc.get("filename", ""),
-            "path": doc.get("url", ""),
-            "size": doc.get("size", 0)
-        })
-    return result
-
-def create_certificate_fb(student_id, student_name, course_id, course_name, teacher_name):
-    """สร้างใบรับรองการเรียนจบ"""
-    try:
-        cert_content = f"""
-        ====================================================
-                      ใบรับรองการเรียนจบ
-        ====================================================
-
-        ชื่อนักเรียน: {student_name}
-        รหัสนักเรียน: {student_id}
-        หลักสูตร: {course_name}
-        ครูผู้สอน: {teacher_name}
-        วันที่เรียนจบ: {datetime.now().strftime('%Y-%m-%d')}
-
-        ====================================================
-                    สถาบัน ZL TA-Learning
-        ====================================================
-        """
-        
-        # Upload certificate to Firebase Storage
-        cert_filename = f"certificates/{student_id}_{course_id}_certificate.txt"
-        cert_url = upload_file_to_storage(cert_content.encode('utf-8'), cert_filename, 'text/plain')
-        
-        if not cert_url:
-            return False, "Upload failed"
-        
-        # Save certificate record
-        certificate_data = {
-            "student_id": student_id,
-            "student_name": student_name,
-            "course_id": str(course_id),
-            "course_name": course_name,
-            "teacher_name": teacher_name,
-            "certificate_url": cert_url,
-            "issued_date": datetime.now().strftime("%Y-%m-%d"),
-            "certificate_id": f"CERT{int(time.time())}"
-        }
-        
-        add_certificate(certificate_data)
-        return True, cert_url
-    except Exception as e:
-        return False, str(e)
-
-def get_certificate_file_fb(student_id, course_id):
-    """ค้นหาไฟล์ใบรับรอง"""
-    try:
-        certificates = get_student_certificates(student_id, course_id)
-        if certificates:
-            return certificates[0].get('certificate_url')
-        return None
-    except:
-        return None
-
-def save_uploaded_certificate_fb(student_id, course_id, file, filename):
-    """บันทึกไฟล์ใบรับรองที่อัปโหลด"""
-    try:
-        # Upload to Firebase Storage
-        file_bytes = file.getvalue()
-        storage_path = f"uploaded_certificates/{student_id}_{course_id}_{filename}"
-        file_url = upload_file_to_storage(file_bytes, storage_path)
-        
-        if not file_url:
-            return False, "Upload failed"
-        
-        # Save certificate record
-        certificate_data = {
-            "student_id": student_id,
-            "course_id": str(course_id),
-            "certificate_url": file_url,
-            "filename": filename,
-            "uploaded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "certificate_id": f"UPLOAD{int(time.time())}"
-        }
-        
-        add_certificate(certificate_data)
-        return True, file_url
-    except Exception as e:
-        return False, str(e)
-
-def get_available_courses_fb():
-    """ดึงคอร์สทั้งหมดที่เปิดสอน"""
-    return get_all_courses()
+def get_quiz_results(student_id, course_id):
+    """ดึงผลแบบฝึกหัด"""
+    quiz_file = f"save_data/quiz_results/{student_id}_{course_id}.json"
+    if os.path.exists(quiz_file):
+        try:
+            with open(quiz_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
 
 def check_answer(student_answer, correct_answer):
     """ตรวจคำตอบ (case insensitive และลบช่องว่าง)"""
@@ -1343,24 +1133,9 @@ def check_answer(student_answer, correct_answer):
     
     return student_clean == correct_clean
 
-def save_exercise_image_fb(course_id, exercise_index, image_file):
-    """บันทึกรูปภาพของแบบฝึกหัด"""
-    try:
-        # Upload to Firebase Storage
-        file_bytes = image_file.getvalue()
-        storage_path = f"exercise_images/{course_id}/exercise_{exercise_index}.{image_file.name.split('.')[-1]}"
-        file_url = upload_file_to_storage(file_bytes, storage_path, 'image/jpeg')
-        
-        return True, file_url
-    except Exception as e:
-        return False, str(e)
-
-def get_teacher_courses_fb(teacher_id):
-    """ดึงคอร์สของครูผู้สอน"""
-    return get_courses_by_teacher(teacher_id)
-
 def embed_jitsi_meet_simple(room_name, display_name):
     """สร้าง Jitsi Meet embed code แบบง่ายๆ สำหรับนักเรียน"""
+    # Clean room name
     room_name_clean = str(room_name).replace(" ", "-").replace("/", "-").replace("\\", "-")
     display_name_clean = str(display_name).replace(" ", "%20")
     
@@ -1380,10 +1155,12 @@ def embed_jitsi_meet_simple(room_name, display_name):
 
 def embed_jitsi_meet(room_name, display_name, fixed=False):
     """สร้าง Jitsi Meet embed code ที่รองรับมือถือ"""
+    # Clean room name
     room_name_clean = str(room_name).replace(" ", "-").replace("/", "-").replace("\\", "-")
     display_name_clean = str(display_name).replace(" ", "%20")
     
     if fixed:
+        # Fixed position for exercise page
         jitsi_code = f'''
         <div class="jitsi-container-fixed">
             <iframe 
@@ -1396,6 +1173,7 @@ def embed_jitsi_meet(room_name, display_name, fixed=False):
         </div>
         '''
     else:
+        # Normal container
         jitsi_code = f'''
         <div class="jitsi-container">
             <iframe 
@@ -1414,69 +1192,346 @@ def embed_jitsi_meet(room_name, display_name, fixed=False):
         '''
     return jitsi_code
 
-# -----------------------------
-# Initialize Sample Data
-# -----------------------------
-def init_sample_data():
-    """Initialize sample data if needed"""
+def save_exercise_image(course_id, exercise_index, image_file):
+    """บันทึกรูปภาพของแบบฝึกหัด"""
     try:
-        # Check if sample teacher exists
-        sample_teacher = get_teacher_by_username("admin")
-        if not sample_teacher:
-            teacher_data = {
-                "teacher_id": "TEA001",
-                "username": "admin",
-                "password_hash": md5("admin123"),
-                "fullname": "ครูผู้ดูแลระบบ",
-                "email": "admin@example.com",
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "role": "admin"
-            }
-            add_teacher(teacher_data)
-            st.sidebar.success("✅ สร้างข้อมูลครูผู้สอนตัวอย่างแล้ว")
+        if isinstance(course_id, float):
+            course_id = str(int(course_id)) if course_id.is_integer() else str(course_id)
         
-        # Check if sample students exist
-        sample_students = [
-            {
-                "student_id": "ZLS101",
-                "fullname": "สมชาย ใจดี",
-                "email": "somchai@example.com",
-                "phone": "0812345678",
-                "created_date": datetime.now().strftime("%Y-%m-%d"),
-                "status": "active"
-            },
-            {
-                "student_id": "ZLS102",
-                "fullname": "สมหญิง เก่งเรียน",
-                "email": "somying@example.com",
-                "phone": "0823456789",
-                "created_date": datetime.now().strftime("%Y-%m-%d"),
-                "status": "active"
-            },
-            {
-                "student_id": "ZLS103",
-                "fullname": "นักศึกษา ตัวอย่าง",
-                "email": "student@example.com",
-                "phone": "0834567890",
-                "created_date": datetime.now().strftime("%Y-%m-%d"),
-                "status": "active"
-            }
-        ]
+        image_folder = f"save_data/exercise_images/{course_id}"
+        os.makedirs(image_folder, exist_ok=True)
         
-        for student in sample_students:
-            existing = get_student(student['student_id'])
-            if not existing:
-                add_student(student)
+        # Get file extension
+        file_ext = image_file.name.split('.')[-1] if '.' in image_file.name else 'jpg'
+        image_path = f"{image_folder}/exercise_{exercise_index}.{file_ext}"
+        
+        # Save image
+        with open(image_path, "wb") as f:
+            f.write(image_file.getbuffer())
+        
+        return True, image_path
+    except Exception as e:
+        return False, str(e)
+
+def teacher_login(username, password):
+    """ตรวจสอบการเข้าสู่ระบบครูผู้สอน"""
+    try:
+        admin_df = get_admin_data()
+        
+        if not admin_df.empty:
+            user_record = admin_df[admin_df["username"] == username]
+            
+            if not user_record.empty:
+                teacher = user_record.iloc[0]
+                password_hash = md5(password)
+                
+                if teacher["password_hash"] == password_hash:
+                    # บันทึกใน teachers.xlsx (สำรอง)
+                    try:
+                        teachers_df = pd.read_excel("save_data/teachers.xlsx")
+                        login_record = {
+                            "teacher_id": teacher["teacher_id"],
+                            "username": username,
+                            "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "status": "success"
+                        }
+                        teachers_df = pd.concat([teachers_df, pd.DataFrame([login_record])], ignore_index=True)
+                        teachers_df.to_excel("save_data/teachers.xlsx", index=False)
+                    except:
+                        pass
+                    
+                    return True, "เข้าสู่ระบบสำเร็จ!", teacher["teacher_id"], teacher["fullname"]
+                else:
+                    return False, "รหัสผ่านไม่ถูกต้อง", None, None
+            else:
+                return False, "ไม่พบบัญชีผู้ใช้งาน", None, None
+        else:
+            return False, "ไม่มีข้อมูลในระบบ", None, None
+    except Exception as e:
+        return False, f"เกิดข้อผิดพลาด: {e}", None, None
+
+def get_teacher_courses(teacher_id):
+    """ดึงคอร์สของครูผู้สอน"""
+    try:
+        courses_df = get_courses_data()
+        if not courses_df.empty and "teacher_id" in courses_df.columns:
+            return courses_df[courses_df["teacher_id"] == teacher_id]
+        return pd.DataFrame()
+    except:
+        return pd.DataFrame()
+
+def save_lesson(course_id, lesson_data):
+    """บันทึกบทเรียน"""
+    try:
+        lesson_file = f"save_data/lessons/{course_id}_lessons.json"
+        
+        if os.path.exists(lesson_file):
+            with open(lesson_file, "r", encoding="utf-8") as f:
+                lessons = json.load(f)
+        else:
+            lessons = []
+        
+        lessons.append(lesson_data)
+        
+        with open(lesson_file, "w", encoding="utf-8") as f:
+            json.dump(lessons, f, ensure_ascii=False, indent=2)
         
         return True
     except Exception as e:
-        st.error(f"Error initializing sample data: {e}")
+        st.error(f"Error saving lesson: {e}")
         return False
 
-# Initialize sample data on first run
-if "sample_data_initialized" not in st.session_state:
-    init_sample_data()
-    st.session_state.sample_data_initialized = True
+def save_exercise(course_id, exercise_data):
+    """บันทึกแบบฝึกหัด"""
+    try:
+        exercise_file = f"save_data/lessons/{course_id}_exercises.json"
+        
+        if os.path.exists(exercise_file):
+            with open(exercise_file, "r", encoding="utf-8") as f:
+                exercises = json.load(f)
+        else:
+            exercises = []
+        
+        exercises.append(exercise_data)
+        
+        with open(exercise_file, "w", encoding="utf-8") as f:
+            json.dump(exercises, f, ensure_ascii=False, indent=2)
+        
+        return True
+    except Exception as e:
+        st.error(f"Error saving exercise: {e}")
+        return False
+
+def save_document(course_id, file, filename):
+    """บันทึกเอกสารประกอบ"""
+    try:
+        # แก้ไข: แปลง course_id เป็น string ถ้ามันเป็น float
+        if isinstance(course_id, float):
+            course_id = str(int(course_id)) if course_id.is_integer() else str(course_id)
+        elif not isinstance(course_id, str):
+            course_id = str(course_id)
+        
+        doc_folder = f"save_data/documents/{course_id}"
+        os.makedirs(doc_folder, exist_ok=True)
+        
+        file_path = f"{doc_folder}/{filename}"
+        with open(file_path, "wb") as f:
+            f.write(file.getbuffer())
+        
+        return True, file_path
+    except Exception as e:
+        return False, str(e)
+
+def create_certificate(student_id, student_name, course_id, course_name, teacher_name):
+    """สร้างใบรับรองการเรียนจบ"""
+    try:
+        cert_folder = "save_data/certificates"
+        os.makedirs(cert_folder, exist_ok=True)
+        
+        # Convert course_id to string if it's float
+        if isinstance(course_id, float):
+            course_id = str(int(course_id)) if course_id.is_integer() else str(course_id)
+        elif not isinstance(course_id, str):
+            course_id = str(course_id)
+            
+        cert_path = f"{cert_folder}/{student_id}_{course_id}_certificate.txt"
+        
+        # สร้างไฟล์ใบรับรองแบบข้อความ
+        with open(cert_path, "w", encoding="utf-8") as f:
+            f.write("="*60 + "\n")
+            f.write("          ใบรับรองการเรียนจบ\n")
+            f.write("="*60 + "\n\n")
+            f.write(f"ชื่อนักเรียน: {student_name}\n")
+            f.write(f"รหัสนักเรียน: {student_id}\n")
+            f.write(f"หลักสูตร: {course_name}\n")
+            f.write(f"ครูผู้สอน: {teacher_name}\n")
+            f.write(f"วันที่เรียนจบ: {datetime.now().strftime('%Y-%m-%d')}\n")
+            f.write("\n" + "="*60 + "\n")
+            f.write("สถาบัน ZL TA-Learning\n")
+            f.write("="*60 + "\n")
+        
+        return True, cert_path
+    except Exception as e:
+        return False, str(e)
+
+def check_teacher_credentials(username, password):
+    """ตรวจสอบข้อมูลครู"""
+    try:
+        admin_df = get_admin_data()
+        if not admin_df.empty:
+            user = admin_df[admin_df["username"] == username]
+            if not user.empty:
+                if user.iloc[0]["password_hash"] == md5(password):
+                    return True, user.iloc[0]["teacher_id"], user.iloc[0]["fullname"]
+        return False, None, None
+    except:
+        return False, None, None
+
+def get_course_documents(course_id):
+    """ดึงรายการเอกสารในคอร์ส"""
+    try:
+        doc_folder = f"save_data/documents/{course_id}"
+        if os.path.exists(doc_folder):
+            files = []
+            for file in os.listdir(doc_folder):
+                file_path = os.path.join(doc_folder, file)
+                if os.path.isfile(file_path):
+                    files.append({
+                        "name": file,
+                        "path": file_path,
+                        "size": os.path.getsize(file_path)
+                    })
+            return files
+        return []
+    except:
+        return []
+
+def get_certificate_file(student_id, course_id):
+    """ค้นหาไฟล์ใบรับรองที่อัปโหลด"""
+    try:
+        certs_folder = "save_data/certificates_files"
+        # ค้นหาไฟล์ใบรับรอง
+        for file in os.listdir(certs_folder):
+            if f"{student_id}_{course_id}" in file:
+                return os.path.join(certs_folder, file)
+        return None
+    except:
+        return None
+
+def save_uploaded_certificate(student_id, course_id, file, filename):
+    """บันทึกไฟล์ใบรับรองที่อัปโหลด"""
+    try:
+        certs_folder = "save_data/certificates_files"
+        os.makedirs(certs_folder, exist_ok=True)
+        
+        # ตั้งชื่อไฟล์
+        file_ext = filename.split('.')[-1] if '.' in filename else ''
+        new_filename = f"{student_id}_{course_id}_certificate.{file_ext}"
+        file_path = os.path.join(certs_folder, new_filename)
+        
+        # บันทึกไฟล์
+        with open(file_path, "wb") as f:
+            f.write(file.getbuffer())
+        
+        return True, file_path
+    except Exception as e:
+        return False, str(e)
+
+def get_available_courses():
+    """ดึงคอร์สทั้งหมดที่เปิดสอน"""
+    try:
+        courses_df = get_courses_data()
+        if not courses_df.empty:
+            return courses_df
+        return pd.DataFrame()
+    except:
+        return pd.DataFrame()
+
+def validate_students_data(df):
+    """ตรวจสอบความถูกต้องของข้อมูลนักเรียน"""
+    errors = []
+    
+    # Check required columns
+    required_columns = ["student_id", "fullname", "email"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        errors.append(f"คอลัมน์ที่ขาด: {', '.join(missing_columns)}")
+    
+    # Check duplicate student_id
+    if "student_id" in df.columns:
+        duplicates = df[df["student_id"].duplicated()]
+        if not duplicates.empty:
+            errors.append(f"พบรหัสนักเรียนซ้ำ {len(duplicates)} รายการ")
+    
+    return errors
+
+def validate_courses_data(df):
+    """ตรวจสอบความถูกต้องของข้อมูลคอร์ส"""
+    errors = []
+    
+    # Check required columns
+    required_columns = ["course_id", "course_name", "teacher_id", "teacher_name"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        errors.append(f"คอลัมน์ที่ขาด: {', '.join(missing_columns)}")
+    
+    # Check duplicate course_id
+    if "course_id" in df.columns:
+        duplicates = df[df["course_id"].duplicated()]
+        if not duplicates.empty:
+            errors.append(f"พบรหัสคอร์สซ้ำ {len(duplicates)} รายการ")
+    
+    return errors
+
+def validate_admin_data(df):
+    """ตรวจสอบความถูกต้องของข้อมูลครู"""
+    errors = []
+    
+    # Check required columns
+    required_columns = ["teacher_id", "username", "password_hash", "fullname"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        errors.append(f"คอลัมน์ที่ขาด: {', '.join(missing_columns)}")
+    
+    # Check duplicate username
+    if "username" in df.columns:
+        duplicates = df[df["username"].duplicated()]
+        if not duplicates.empty:
+            errors.append(f"พบชื่อผู้ใช้ซ้ำ {len(duplicates)} รายการ")
+    
+    return errors
+
+def save_all_data():
+    """บันทึกข้อมูลทั้งหมดใน session state ลงไฟล์"""
+    try:
+        # 1. บันทึกข้อมูลนักเรียน
+        if st.session_state.current_students is not None and not st.session_state.current_students.empty:
+            st.session_state.current_students.to_excel("data/students.xlsx", index=False)
+            st.toast("✅ บันทึกข้อมูลนักเรียนเรียบร้อย", icon="✅")
+        
+        # 2. บันทึกข้อมูลคอร์ส
+        if st.session_state.current_courses is not None and not st.session_state.current_courses.empty:
+            st.session_state.current_courses.to_excel("data/courses.xlsx", index=False)
+            st.toast("✅ บันทึกข้อมูลคอร์สเรียบร้อย", icon="✅")
+        
+        # 3. บันทึกข้อมูลครู
+        if st.session_state.current_admin is not None and not st.session_state.current_admin.empty:
+            st.session_state.current_admin.to_excel("data/admin.xlsx", index=False)
+            st.toast("✅ บันทึกข้อมูลครูเรียบร้อย", icon="✅")
+        
+        # 4. บันทึกข้อมูลการลงทะเบียน
+        if st.session_state.student_courses_df is not None and not st.session_state.student_courses_df.empty:
+            st.session_state.student_courses_df.to_excel("save_data/student_courses.xlsx", index=False)
+        
+        # 5. บันทึกข้อมูลตรวจสอบ
+        if st.session_state.students_check_df is not None and not st.session_state.students_check_df.empty:
+            st.session_state.students_check_df.to_excel("save_data/students_check.xlsx", index=False)
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"❌ เกิดข้อผิดพลาด: {e}")
+        return False
+
+def load_template_data():
+    """โหลดข้อมูลจากไฟล์ในเครื่อง"""
+    try:
+        # โหลดข้อมูลจากไฟล์ในเครื่อง
+        students_df = pd.read_excel("data/students.xlsx")
+        courses_df = pd.read_excel("data/courses.xlsx")
+        admin_df = pd.read_excel("data/admin.xlsx")
+        
+        st.session_state.current_students = students_df
+        st.session_state.current_courses = courses_df
+        st.session_state.current_admin = admin_df
+        
+        return True
+    except Exception as e:
+        st.error(f"❌ เกิดข้อผิดพลาดในการโหลดข้อมูล: {e}")
+        return False
+
+# Initialize data folder
+init_data_folder()
 
 # -----------------------------
 # STUDENT ID CHECK PAGE
@@ -1573,8 +1628,9 @@ elif st.session_state.page == "student_home" and st.session_state.role == "stude
         
         # Get attendance count
         try:
-            student_checks = get_student_checks(st.session_state.student_id)
-            attendance_count = len(student_checks) if student_checks else 0
+            check_df = get_student_check_data()
+            student_checks = check_df[check_df["student_id"] == st.session_state.student_id]
+            attendance_count = len(student_checks) if not student_checks.empty else 0
             st.write(f"**📊 เข้าเรียนแล้ว:** {attendance_count} ครั้ง")
         except:
             attendance_count = 0
@@ -1621,19 +1677,19 @@ elif st.session_state.page == "student_home" and st.session_state.role == "stude
         st.subheader("📚 คอร์สเรียนที่เปิดสอน")
         
         try:
-            courses = get_available_courses_fb()
+            courses_df = get_available_courses()
             
-            if courses:
+            if not courses_df.empty:
                 # Create course grid
                 cols = st.columns(3)
-                for idx, course in enumerate(courses):
+                for idx, row in courses_df.iterrows():
                     if idx < 6:  # Show max 6 courses
                         with cols[idx % 3]:
                             st.markdown('<div class="course-card">', unsafe_allow_html=True)
                             
                             # Display course image if exists
-                            image_path = course.get('image_path', '')
-                            if isinstance(image_path, str) and image_path != 'nan' and image_path.startswith('http'):
+                            image_path = row.get('image_path', '')
+                            if isinstance(image_path, str) and image_path != 'nan' and os.path.exists(image_path):
                                 st.image(image_path, use_container_width=True)
                             else:
                                 # Placeholder image
@@ -1642,11 +1698,11 @@ elif st.session_state.page == "student_home" and st.session_state.role == "stude
                                     unsafe_allow_html=True
                                 )
                             
-                            course_name = str(course.get("course_name", "ไม่มีชื่อ"))
-                            teacher_name = str(course.get("teacher_name", "ครูผู้สอน"))
-                            description = str(course.get("description", "ไม่มีคำอธิบาย"))
-                            class_type = str(course.get("class_type", "กลุ่ม"))
-                            course_id = str(course.get("course_id", ""))
+                            course_name = str(row.get("course_name", "ไม่มีชื่อ"))
+                            teacher_name = str(row.get("teacher_name", "ครูผู้สอน"))
+                            description = str(row.get("description", "ไม่มีคำอธิบาย"))
+                            class_type = str(row.get("class_type", "กลุ่ม"))
+                            course_id = str(row.get("course_id", ""))
                             
                             st.markdown(f'<h4>{course_name}</h4>', unsafe_allow_html=True)
                             st.write(f"👨‍🏫 **ครูผู้สอน:** {teacher_name}")
@@ -1654,17 +1710,17 @@ elif st.session_state.page == "student_home" and st.session_state.role == "stude
                             st.write(f"👥 **ประเภท:** {class_type}")
                             
                             # Check if already enrolled
-                            enrolled_courses = get_student_courses_fb(st.session_state.student_id)
+                            enrolled_courses = get_student_courses(st.session_state.student_id)
                             is_enrolled = False
                             
-                            if enrolled_courses and course_id and course_id != 'nan':
-                                is_enrolled = any(c['course_id'] == course_id for c in enrolled_courses)
+                            if not enrolled_courses.empty and course_id and course_id != 'nan':
+                                is_enrolled = not enrolled_courses[enrolled_courses["course_id"] == course_id].empty
                             
                             col_btn1, col_btn2 = st.columns(2)
                             with col_btn1:
                                 if not is_enrolled and course_id and course_id != 'nan':
                                     if st.button("📝 ลงทะเบียน", key=f"enroll_{course_id}_{idx}", use_container_width=True):
-                                        success = enroll_student_in_course_fb(
+                                        success = enroll_student_in_course(
                                             st.session_state.student_id,
                                             st.session_state.student_name,
                                             course_id,
@@ -1683,24 +1739,29 @@ elif st.session_state.page == "student_home" and st.session_state.role == "stude
                                 if is_enrolled:
                                     if st.button("🎥 เข้าเรียนสด", key=f"live_home_{course_id}_{idx}", use_container_width=True):
                                         try:
-                                            course_data = {
-                                                "course_id": course_id,
-                                                "course_name": course_name,
-                                                "teacher_id": course.get('teacher_id', ''),
-                                                "teacher_name": teacher_name,
-                                                "jitsi_room": course.get('jitsi_room', 'default_room'),
-                                                "description": description,
-                                                "class_type": class_type
-                                            }
-                                            st.session_state.current_course = course_data
-                                            st.session_state.page = "live_student_session"
-                                            st.rerun()
+                                            courses_df = get_courses_data()
+                                            if course_id:
+                                                course_info = courses_df[courses_df["course_id"] == course_id]
+                                                if not course_info.empty:
+                                                    course_row = course_info.iloc[0]
+                                                    course_data = {
+                                                        "course_id": course_row.get('course_id', ''),
+                                                        "course_name": course_row.get('course_name', ''),
+                                                        "teacher_id": course_row.get('teacher_id', ''),
+                                                        "teacher_name": course_row.get('teacher_name', 'ครูผู้สอน'),
+                                                        "jitsi_room": course_row.get('jitsi_room', 'default_room'),
+                                                        "description": course_row.get('description', ''),
+                                                        "class_type": course_row.get('class_type', 'กลุ่ม')
+                                                    }
+                                                    st.session_state.current_course = course_data
+                                                    st.session_state.page = "live_student_session"
+                                                    st.rerun()
                                         except Exception as e:
                                             st.error(f"เกิดข้อผิดพลาด: {e}")
                             
                             st.markdown('</div>', unsafe_allow_html=True)
                 # Show more courses button if there are more
-                if len(courses) > 6:
+                if len(courses_df) > 6:
                     if st.button("ดูคอร์สทั้งหมด", use_container_width=True):
                         st.session_state.page = "student_courses"
                         st.rerun()
@@ -1718,64 +1779,74 @@ elif st.session_state.page == "student_home" and st.session_state.role == "stude
         st.title("📚 คอร์สของฉัน")
         st.markdown("---")
         
-        enrolled_courses = get_student_courses_fb(st.session_state.student_id)
+        enrolled_courses = get_student_courses(st.session_state.student_id)
         
-        if enrolled_courses:
+        if not enrolled_courses.empty:
             st.subheader("คอร์สที่ลงทะเบียนแล้ว")
             
             cols = st.columns(3)
-            for idx, course in enumerate(enrolled_courses):
+            for idx, row in enrolled_courses.iterrows():
                 with cols[idx % 3]:
                     st.markdown('<div class="course-card">', unsafe_allow_html=True)
                     
-                    course_id = course["course_id"]
-                    course_name = course["course_name"]
+                    course_id = row["course_id"]
+                    course_name = row["course_name"]
                     
                     # Try to get course details
                     try:
-                        course_details = get_course(course_id)
+                        courses_df = get_courses_data()
+                        course_details = courses_df[courses_df["course_id"] == course_id]
                         
-                        if course_details:
-                            image_path = course_details.get('image_path', '')
+                        if not course_details.empty:
+                            course_detail = course_details.iloc[0]
+                            image_path = course_detail.get('image_path', '')
                             
-                            if image_path and image_path.startswith('http'):
+                            if image_path and os.path.exists(image_path):
                                 st.image(image_path, use_container_width=True)
                     except:
                         pass
                     
                     st.markdown(f'<h4>{course_name}</h4>', unsafe_allow_html=True)
-                    st.write(f"**สถานะ:** {'✅ เรียนจบ' if course.get('completion_status', False) else '📚 กำลังเรียน'}")
-                    st.write(f"**วันที่ลงทะเบียน:** {course.get('enrollment_date', '')}")
+                    st.write(f"**สถานะ:** {'✅ เรียนจบ' if row.get('completion_status', False) else '📚 กำลังเรียน'}")
+                    st.write(f"**วันที่ลงทะเบียน:** {row.get('enrollment_date', '')}")
                     
                     col_btn1, col_btn2 = st.columns(2)
                     with col_btn1:
                         if st.button("🎥 เข้าเรียน", key=f"go_live_{course_id}", use_container_width=True):
                             try:
-                                course_info = get_course(course_id)
-                                if course_info:
-                                    course_data = {
-                                        "course_id": course_id,
-                                        "course_name": course_info.get('course_name', ''),
-                                        "teacher_id": course_info.get('teacher_id', ''),
-                                        "teacher_name": course_info.get('teacher_name', 'ครูผู้สอน'),
-                                        "jitsi_room": course_info.get('jitsi_room', 'default_room'),
-                                        "description": course_info.get('description', ''),
-                                        "class_type": course_info.get('class_type', 'กลุ่ม')
-                                    }
-                                    st.session_state.current_course = course_data
-                                    st.session_state.page = "live_student_session"
-                                    st.rerun()
+                                courses_df = get_courses_data()
+                                if course_id:
+                                    course_info = courses_df[courses_df["course_id"] == course_id]
+                                    if not course_info.empty:
+                                        course_row = course_info.iloc[0]
+                                        course_data = {
+                                            "course_id": course_row.get('course_id', ''),
+                                            "course_name": course_row.get('course_name', ''),
+                                            "teacher_id": course_row.get('teacher_id', ''),
+                                            "teacher_name": course_row.get('teacher_name', 'ครูผู้สอน'),
+                                            "jitsi_room": course_row.get('jitsi_room', 'default_room'),
+                                            "description": course_row.get('description', ''),
+                                            "class_type": course_row.get('class_type', 'กลุ่ม')
+                                        }
+                                        st.session_state.current_course = course_data
+                                        st.session_state.page = "live_student_session"
+                                        st.rerun()
                             except Exception as e:
                                 st.error(f"เกิดข้อผิดพลาด: {e}")
                     
                     with col_btn2:
-                        if course.get('completion_status', False):
+                        if row.get('completion_status', False):
                             if st.button("📜 ใบรับรอง", key=f"cert_{course_id}", use_container_width=True):
-                                cert_url = get_certificate_file_fb(st.session_state.student_id, course_id)
-                                if cert_url:
-                                    # For now, just show the URL
-                                    st.info(f"ใบรับรอง URL: {cert_url}")
-                                    # In a real app, you would create a download button
+                                cert_path = get_certificate_file(st.session_state.student_id, course_id)
+                                if cert_path and os.path.exists(cert_path):
+                                    with open(cert_path, "rb") as f:
+                                        cert_data = f.read()
+                                    st.download_button(
+                                        label="📥 ดาวน์โหลดใบรับรอง",
+                                        data=cert_data,
+                                        file_name=f"certificate_{course_id}.pdf",
+                                        mime="application/pdf"
+                                    )
                                 else:
                                     st.info("ยังไม่มีใบรับรองสำหรับคอร์สนี้")
                     
@@ -1786,22 +1857,22 @@ elif st.session_state.page == "student_home" and st.session_state.role == "stude
             # Show available courses
             st.subheader("คอร์สเรียนที่เปิดสอน")
             try:
-                courses = get_available_courses_fb()
-                if courses:
-                    for course in courses:
-                        with st.expander(f"{course['course_name']} - {course.get('teacher_name', 'ครูผู้สอน')}"):
-                            st.write(f"**คำอธิบาย:** {course.get('description', '')}")
-                            st.write(f"**ประเภท:** {course.get('class_type', 'กลุ่ม')}")
+                courses_df = get_available_courses()
+                if not courses_df.empty:
+                    for idx, row in courses_df.iterrows():
+                        with st.expander(f"{row['course_name']} - {row.get('teacher_name', 'ครูผู้สอน')}"):
+                            st.write(f"**คำอธิบาย:** {row.get('description', '')}")
+                            st.write(f"**ประเภท:** {row.get('class_type', 'กลุ่ม')}")
                             
-                            if st.button("📝 ลงทะเบียน", key=f"enroll_avail_{course['course_id']}"):
-                                success = enroll_student_in_course_fb(
+                            if st.button("📝 ลงทะเบียน", key=f"enroll_avail_{row['course_id']}"):
+                                success = enroll_student_in_course(
                                     st.session_state.student_id,
                                     st.session_state.student_name,
-                                    course['course_id'],
-                                    course['course_name']
+                                    row['course_id'],
+                                    row['course_name']
                                 )
                                 if success:
-                                    st.success(f"✅ ลงทะเบียนคอร์ส {course['course_name']} สำเร็จ!")
+                                    st.success(f"✅ ลงทะเบียนคอร์ส {row['course_name']} สำเร็จ!")
                                     st.rerun()
                 else:
                     st.info("ยังไม่มีคอร์สเรียนที่เปิดสอน")
@@ -1813,37 +1884,42 @@ elif st.session_state.page == "student_home" and st.session_state.role == "stude
         st.title("📄 ดาวน์โหลดเอกสารประกอบการเรียน")
         st.markdown("---")
         
-        enrolled_courses = get_student_courses_fb(st.session_state.student_id)
+        enrolled_courses = get_student_courses(st.session_state.student_id)
         
-        if enrolled_courses:
+        if not enrolled_courses.empty:
             # Filter only completed courses
-            completed_courses = [c for c in enrolled_courses if c.get("completion_status") == True]
+            completed_courses = enrolled_courses[enrolled_courses["completion_status"] == True]
             
-            if completed_courses:
+            if not completed_courses.empty:
                 selected_course = st.selectbox(
                     "**เลือกคอร์ส**",
-                    [c['course_name'] for c in completed_courses],
+                    completed_courses["course_name"].tolist(),
                     key="student_doc_course"
                 )
                 
-                course_id = next((c['course_id'] for c in completed_courses if c['course_name'] == selected_course), None)
+                course_id = completed_courses[completed_courses["course_name"] == selected_course]["course_id"].iloc[0]
                 
-                if course_id:
-                    # Get documents for this course
-                    documents = get_course_documents_fb_wrapper(course_id)
-                    
-                    if documents:
-                        st.subheader(f"เอกสารสำหรับคอร์ส: {selected_course}")
-                        for doc in documents:
-                            col1, col2 = st.columns([3, 1])
-                            with col1:
-                                st.write(f"📄 {doc['name']}")
-                                st.caption(f"ขนาด: {doc['size']:,} bytes")
-                            with col2:
-                                # Since we have URLs, we can use markdown to create download links
-                                st.markdown(f'<a href="{doc["path"]}" download="{doc["name"]}" style="text-decoration: none;"><button style="background: linear-gradient(135deg, #1A237E, #3949AB); color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer;">📥 ดาวน์โหลด</button></a>', unsafe_allow_html=True)
-                    else:
-                        st.info("ยังไม่มีเอกสารสำหรับคอร์สนี้")
+                # Get documents for this course
+                documents = get_course_documents(course_id)
+                
+                if documents:
+                    st.subheader(f"เอกสารสำหรับคอร์ส: {selected_course}")
+                    for doc in documents:
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.write(f"📄 {doc['name']}")
+                            st.caption(f"ขนาด: {doc['size']:,} bytes")
+                        with col2:
+                            with open(doc['path'], 'rb') as f:
+                                st.download_button(
+                                    label="📥 ดาวน์โหลด",
+                                    data=f,
+                                    file_name=doc['name'],
+                                    mime="application/octet-stream",
+                                    key=f"download_{doc['name']}"
+                                )
+                else:
+                    st.info("ยังไม่มีเอกสารสำหรับคอร์สนี้")
             else:
                 st.info("คุณยังไม่จบคอร์สใดๆ จึงไม่สามารถดาวน์โหลดเอกสารได้")
         else:
@@ -1940,7 +2016,7 @@ elif st.session_state.page == "live_student_session" and st.session_state.role =
             
             if course_id and st.session_state.show_lessons:
                 # Load lessons
-                lessons = get_course_lessons_fb(course_id)
+                lessons = get_course_lessons(course_id)
                 
                 if lessons:
                     # Lesson selection
@@ -1959,10 +2035,25 @@ elif st.session_state.page == "live_student_session" and st.session_state.role =
                             st.write(f"{content_preview}..." if len(content_preview) >= 200 else content_preview)
                             
                             # File download
-                            if lesson.get('file_url'):
-                                file_url = lesson.get('file_url')
-                                if file_url and isinstance(file_url, str) and file_url.strip():
-                                    st.markdown(f'<a href="{file_url}" download style="text-decoration: none;"><button style="background: linear-gradient(135deg, #1A237E, #3949AB); color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; width: 100%;">📥 ดาวน์โหลด</button></a>', unsafe_allow_html=True)
+                            if lesson.get('file'):
+                                file_path = lesson.get('file')
+                                if file_path and isinstance(file_path, str) and file_path.strip():
+                                    if os.path.exists(file_path) and os.path.isfile(file_path):
+                                        try:
+                                            with open(file_path, "rb") as f:
+                                                file_bytes = f.read()
+                                            st.download_button(
+                                                label="📥 ดาวน์โหลด",
+                                                data=file_bytes,
+                                                file_name=os.path.basename(file_path),
+                                                mime="application/octet-stream",
+                                                key="download_lesson_file_live",
+                                                use_container_width=True
+                                            )
+                                        except Exception as e:
+                                            st.warning(f"⚠️ ไม่สามารถโหลดไฟล์: {e}")
+                                    else:
+                                        st.warning(f"⚠️ ไฟล์ไม่พบในระบบ")
                 else:
                     st.info("ยังไม่มีบทเรียนในคอร์สนี้")
     else:
@@ -2014,7 +2105,7 @@ elif st.session_state.page == "student_exercise_page" and st.session_state.role 
                 st.rerun()
         
         # Load exercises
-        exercises_data = get_course_exercises_fb(course_id)
+        exercises_data = get_course_exercises(course_id)
         
         if exercises_data:
             # Initialize session state for exercises
@@ -2055,7 +2146,7 @@ elif st.session_state.page == "student_exercise_page" and st.session_state.role 
                     st.markdown(f'<div class="exercise-question">❓ {exercise.get("question", "ไม่มีคำถาม")}</div>', unsafe_allow_html=True)
                     
                     # Display image if exists
-                    if exercise.get("image_path") and exercise["image_path"].startswith('http'):
+                    if exercise.get("image_path") and os.path.exists(exercise["image_path"]):
                         st.image(exercise["image_path"], use_container_width=True, caption="รูปภาพคำถาม")
                     
                     is_completed = st.session_state.completed_exercises[course_id].get(exercise_key, False)
@@ -2085,7 +2176,7 @@ elif st.session_state.page == "student_exercise_page" and st.session_state.role 
                                     
                                     if is_correct:
                                         # Save result
-                                        save_quiz_result_fb_wrapper(
+                                        save_quiz_result(
                                             st.session_state.student_id,
                                             course_id,
                                             current_lesson,
@@ -2171,7 +2262,7 @@ elif st.session_state.page == "student_exercise_page" and st.session_state.role 
                             st.rerun()
                     else:
                         if st.button("🏆 ประกาศเรียนจบ", type="primary", use_container_width=True):
-                            success = mark_course_completed_fb(st.session_state.student_id, course_id)
+                            success = mark_course_completed(st.session_state.student_id, course_id)
                             if success:
                                 st.success("✅ **บันทึกการเรียนจบเรียบร้อย!**")
                                 time.sleep(2)
@@ -2267,11 +2358,31 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         st.title(f"👨‍🏫 {st.session_state.teacher_name}")
         st.write(f"**ID:** {st.session_state.teacher_id}")
         
+        # แสดงสถานะข้อมูล
+        st.markdown("---")
+        st.subheader("📊 สถานะข้อมูล")
+        
+        if st.session_state.current_students is not None:
+            st.write(f"👥 นักเรียน: {len(st.session_state.current_students)} คน")
+        else:
+            st.write("👥 นักเรียน: กำลังโหลดจากไฟล์...")
+            
+        if st.session_state.current_courses is not None:
+            st.write(f"📚 คอร์ส: {len(st.session_state.current_courses)} คอร์ส")
+        else:
+            st.write("📚 คอร์ส: กำลังโหลดจากไฟล์...")
+            
+        if st.session_state.current_admin is not None:
+            st.write(f"👨‍🏫 ครูผู้สอน: {len(st.session_state.current_admin)} คน")
+        else:
+            st.write("👨‍🏫 ครูผู้สอน: กำลังโหลดจากไฟล์...")
+        
         st.markdown("---")
         
         # Teacher Menu
         menu_options = [
             "📊 Dashboard", 
+            "📤 อัปโหลดไฟล์ Excel ดิบ",
             "📚 จัดการคอร์ส", 
             "➕ สร้างคอร์สใหม่", 
             "📖 จัดการบทเรียน", 
@@ -2279,7 +2390,8 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
             "🎥 สอนสด",
             "📤 อัปโหลดเอกสาร", 
             "🎓 ออกใบรับรอง", 
-            "🔗 สร้างลิงก์เรียน"
+            "🔗 สร้างลิงก์เรียน",
+            "💾 บันทึกและดาวน์โหลดข้อมูล"
         ]
         
         menu_choice = st.radio("**เมนูครูผู้สอน**", menu_options, key="teacher_menu")
@@ -2288,6 +2400,8 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         
         # Logout button
         if st.button("🚪 ออกจากระบบ", use_container_width=True, key="teacher_logout"):
+            # บันทึกข้อมูลก่อนออกจากระบบ
+            save_all_data()
             st.session_state.clear()
             st.rerun()
     
@@ -2300,11 +2414,12 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         col1, col2, col3 = st.columns(3)
         
         try:
-            my_courses = get_teacher_courses_fb(st.session_state.teacher_id)
+            courses_df = get_courses_data()
+            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
             num_courses = len(my_courses)
         except:
             num_courses = 0
-            my_courses = []
+            my_courses = pd.DataFrame()
         
         with col1:
             st.markdown(f"""
@@ -2317,10 +2432,10 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         
         with col2:
             try:
-                enrolled_students = 0
-                for course in my_courses:
-                    enrollments = get_student_enrollments(course['course_id'])
-                    enrolled_students += len(enrollments)
+                student_courses_df = get_student_courses_data()
+                teacher_course_ids = my_courses["course_id"].tolist() if not my_courses.empty else []
+                teacher_students = student_courses_df[student_courses_df["course_id"].isin(teacher_course_ids)] if not student_courses_df.empty else pd.DataFrame()
+                enrolled_students = teacher_students["student_id"].nunique() if not teacher_students.empty else 0
             except:
                 enrolled_students = 0
             
@@ -2335,8 +2450,8 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         with col3:
             total_lessons = 0
             try:
-                for course in my_courses:
-                    lessons = get_course_lessons_fb(course['course_id'])
+                for course_id in my_courses["course_id"]:
+                    lessons = get_course_lessons(course_id)
                     total_lessons += len(lessons)
             except:
                 pass
@@ -2349,16 +2464,38 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
             </div>
             """, unsafe_allow_html=True)
         
+        # Quick actions
+        st.markdown("---")
+        st.subheader("🚀 ตัวเลือกด่วน")
+        
+        col_act1, col_act2, col_act3 = st.columns(3)
+        
+        with col_act1:
+            if st.button("📤 อัปโหลดไฟล์ Excel", use_container_width=True):
+                st.session_state.page = "upload_excel"
+                st.rerun()
+        
+        with col_act2:
+            if st.button("➕ สร้างคอร์สใหม่", use_container_width=True):
+                st.session_state.page = "create_course"
+                st.rerun()
+        
+        with col_act3:
+            if st.button("💾 บันทึกข้อมูล", use_container_width=True):
+                if save_all_data():
+                    st.success("บันทึกข้อมูลทั้งหมดเรียบร้อย")
+                    st.rerun()
+        
         # Recent courses
         st.subheader("คอร์สล่าสุดของฉัน")
-        if my_courses:
+        if not my_courses.empty:
             cols = st.columns(3)
-            for idx, course in enumerate(my_courses[-3:]):
+            for idx, row in my_courses.tail(3).iterrows():
                 with cols[idx % 3]:
                     st.markdown('<div class="course-card">', unsafe_allow_html=True)
                     
-                    image_path = course.get("image_path", "")
-                    if image_path and image_path.startswith('http'):
+                    image_path = row.get("image_path", "")
+                    if image_path and os.path.exists(image_path):
                         st.image(image_path, use_container_width=True)
                     else:
                         st.markdown(
@@ -2366,18 +2503,18 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
                             unsafe_allow_html=True
                         )
                     
-                    st.write(f"**{course['course_name']}**")
-                    st.caption(course.get("description", "")[:80] + "...")
+                    st.write(f"**{row['course_name']}**")
+                    st.caption(row.get("description", "")[:80] + "...")
                     
                     col_a, col_b = st.columns(2)
                     with col_a:
-                        if st.button("จัดการ", key=f"manage_{course['course_id']}", use_container_width=True):
-                            st.session_state.edit_course = course
+                        if st.button("จัดการ", key=f"manage_{row['course_id']}", use_container_width=True):
+                            st.session_state.edit_course = row.to_dict()
                             st.session_state.page = "edit_course"
                             st.rerun()
                     with col_b:
-                        if st.button("สอนสด", key=f"live_{course['course_id']}", use_container_width=True):
-                            st.session_state.current_course = course
+                        if st.button("สอนสด", key=f"live_{row['course_id']}", use_container_width=True):
+                            st.session_state.current_course = row.to_dict()
                             st.session_state.page = "live_teaching"
                             st.rerun()
                     
@@ -2385,43 +2522,373 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         else:
             st.info("ยังไม่มีคอร์สเรียน กรุณาสร้างคอร์สใหม่")
     
+    # ---------- UPLOAD EXCEL FILES ----------
+    elif menu_choice == "📤 อัปโหลดไฟล์ Excel ดิบ":
+        st.title("📤 อัปโหลดไฟล์ Excel ดิบ")
+        st.markdown("---")
+        
+        # แท็บสำหรับการทำงานต่างๆ
+        tab1, tab2, tab3 = st.tabs(["📁 อัปโหลดไฟล์", "👁️ ดูข้อมูลปัจจุบัน", "📋 ดาวน์โหลด Template"])
+        
+        with tab1:
+            st.subheader("อัปโหลดไฟล์ Excel ข้อมูลดิบ")
+            
+            # อัปโหลดไฟล์หลายไฟล์พร้อมกัน
+            uploaded_files = st.file_uploader(
+                "เลือกไฟล์ Excel (.xlsx, .xls) - สามารถเลือกหลายไฟล์ได้",
+                type=["xlsx", "xls"],
+                accept_multiple_files=True,
+                key="multi_excel_upload"
+            )
+            
+            if uploaded_files:
+                st.success(f"✅ พบไฟล์ที่อัปโหลด {len(uploaded_files)} ไฟล์")
+                
+                for uploaded_file in uploaded_files:
+                    try:
+                        # อ่านไฟล์ Excel
+                        df = pd.read_excel(uploaded_file)
+                        
+                        # ตรวจสอบประเภทไฟล์จากคอลัมน์
+                        file_type = "ไม่ทราบประเภท"
+                        
+                        if "student_id" in df.columns:
+                            file_type = "ข้อมูลนักเรียน"
+                            st.session_state.uploaded_students = df
+                            errors = validate_students_data(df)
+                            
+                            if errors:
+                                st.warning(f"⚠️ ไฟล์ {uploaded_file.name} มีข้อผิดพลาด:")
+                                for error in errors:
+                                    st.write(f"   - {error}")
+                            else:
+                                st.success(f"✅ ไฟล์ {uploaded_file.name} ({len(df)} รายการ) - {file_type}")
+                        
+                        elif "course_id" in df.columns:
+                            file_type = "ข้อมูลคอร์ส"
+                            st.session_state.uploaded_courses = df
+                            errors = validate_courses_data(df)
+                            
+                            if errors:
+                                st.warning(f"⚠️ ไฟล์ {uploaded_file.name} มีข้อผิดพลาด:")
+                                for error in errors:
+                                    st.write(f"   - {error}")
+                            else:
+                                st.success(f"✅ ไฟล์ {uploaded_file.name} ({len(df)} รายการ) - {file_type}")
+                        
+                        elif "teacher_id" in df.columns or "username" in df.columns:
+                            file_type = "ข้อมูลครูผู้สอน"
+                            st.session_state.uploaded_admin = df
+                            errors = validate_admin_data(df)
+                            
+                            if errors:
+                                st.warning(f"⚠️ ไฟล์ {uploaded_file.name} มีข้อผิดพลาด:")
+                                for error in errors:
+                                    st.write(f"   - {error}")
+                            else:
+                                st.success(f"✅ ไฟล์ {uploaded_file.name} ({len(df)} รายการ) - {file_type}")
+                        
+                        else:
+                            st.warning(f"⚠️ ไม่สามารถระบุประเภทไฟล์: {uploaded_file.name}")
+                            st.write("คอลัมน์ที่มี:", df.columns.tolist())
+                        
+                        # แสดงตัวอย่างข้อมูล
+                        with st.expander(f"📊 ดูตัวอย่างข้อมูลจาก {uploaded_file.name}"):
+                            st.dataframe(df.head())
+                            
+                    except Exception as e:
+                        st.error(f"❌ เกิดข้อผิดพลาดในการอ่านไฟล์ {uploaded_file.name}: {e}")
+                
+                # ปุ่มโหลดข้อมูลทั้งหมดเข้าสู่ระบบ
+                st.markdown("---")
+                col_load, col_clear = st.columns(2)
+                
+                with col_load:
+                    if st.button("🔄 โหลดข้อมูลทั้งหมดเข้าสู่ระบบ", type="primary", use_container_width=True):
+                        files_loaded = []
+                        
+                        if st.session_state.uploaded_students is not None:
+                            st.session_state.current_students = st.session_state.uploaded_students
+                            files_loaded.append(f"👥 ข้อมูลนักเรียน ({len(st.session_state.uploaded_students)} รายการ)")
+                        
+                        if st.session_state.uploaded_courses is not None:
+                            st.session_state.current_courses = st.session_state.uploaded_courses
+                            files_loaded.append(f"📚 ข้อมูลคอร์ส ({len(st.session_state.uploaded_courses)} รายการ)")
+                        
+                        if st.session_state.uploaded_admin is not None:
+                            st.session_state.current_admin = st.session_state.uploaded_admin
+                            files_loaded.append(f"👨‍🏫 ข้อมูลครู ({len(st.session_state.uploaded_admin)} รายการ)")
+                        
+                        if files_loaded:
+                            st.success("✅ **โหลดข้อมูลเข้าสู่ระบบสำเร็จ:**")
+                            for file_info in files_loaded:
+                                st.write(f"- {file_info}")
+                            
+                            # บันทึกข้อมูลลงไฟล์
+                            save_all_data()
+                            
+                            time.sleep(2)
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ กรุณาอัปโหลดไฟล์อย่างน้อย 1 ไฟล์")
+                
+                with col_clear:
+                    if st.button("🗑️ ล้างข้อมูลที่อัปโหลด", type="secondary", use_container_width=True):
+                        st.session_state.uploaded_students = None
+                        st.session_state.uploaded_courses = None
+                        st.session_state.uploaded_admin = None
+                        st.success("✅ ล้างข้อมูลที่อัปโหลดเรียบร้อย")
+                        st.rerun()
+        
+        with tab2:
+            st.subheader("ข้อมูลปัจจุบันในระบบ")
+            
+            # แสดงข้อมูลปัจจุบัน
+            view_option = st.selectbox("เลือกข้อมูลที่ต้องการดู", [
+                "ข้อมูลนักเรียน",
+                "ข้อมูลคอร์ส", 
+                "ข้อมูลครูผู้สอน",
+                "ข้อมูลการลงทะเบียน",
+                "ข้อมูลการเข้าเรียน"
+            ])
+            
+            if view_option == "ข้อมูลนักเรียน":
+                df = get_students_data()
+                if not df.empty:
+                    st.write(f"**จำนวนนักเรียน:** {len(df)} คน")
+                    st.dataframe(df)
+                    
+                    # สถิติ
+                    col_stat1, col_stat2 = st.columns(2)
+                    with col_stat1:
+                        active_count = df[df["status"] == "active"].shape[0] if "status" in df.columns else 0
+                        st.metric("สถานะ Active", f"{active_count} คน")
+                    
+                    with col_stat2:
+                        if "created_date" in df.columns:
+                            recent_count = df[df["created_date"] == datetime.now().strftime("%Y-%m-%d")].shape[0]
+                            st.metric("เพิ่มวันนี้", f"{recent_count} คน")
+                else:
+                    st.info("ยังไม่มีข้อมูลนักเรียน")
+            
+            elif view_option == "ข้อมูลคอร์ส":
+                df = get_courses_data()
+                if not df.empty:
+                    st.write(f"**จำนวนคอร์ส:** {len(df)} คอร์ส")
+                    st.dataframe(df)
+                    
+                    # สถิติ
+                    col_stat1, col_stat2, col_stat3 = st.columns(3)
+                    with col_stat1:
+                        active_courses = df[df["status"] == "active"].shape[0] if "status" in df.columns else 0
+                        st.metric("คอร์ส Active", f"{active_courses} คอร์ส")
+                    
+                    with col_stat2:
+                        if "class_type" in df.columns:
+                            group_courses = df[df["class_type"] == "กลุ่ม"].shape[0]
+                            st.metric("คอร์สกลุ่ม", f"{group_courses} คอร์ส")
+                    
+                    with col_stat3:
+                        my_courses = df[df["teacher_id"] == st.session_state.teacher_id].shape[0] if "teacher_id" in df.columns else 0
+                        st.metric("คอร์สของฉัน", f"{my_courses} คอร์ส")
+                else:
+                    st.info("ยังไม่มีข้อมูลคอร์ส")
+            
+            elif view_option == "ข้อมูลครูผู้สอน":
+                df = get_admin_data()
+                if not df.empty:
+                    st.write(f"**จำนวนครูผู้สอน:** {len(df)} คน")
+                    st.dataframe(df)
+                else:
+                    st.info("ยังไม่มีข้อมูลครูผู้สอน")
+            
+            elif view_option == "ข้อมูลการลงทะเบียน":
+                df = get_student_courses_data()
+                if not df.empty:
+                    st.write(f"**จำนวนการลงทะเบียน:** {len(df)} รายการ")
+                    st.dataframe(df)
+                    
+                    # สถิติ
+                    col_stat1, col_stat2 = st.columns(2)
+                    with col_stat1:
+                        completed_count = df[df["completion_status"] == True].shape[0] if "completion_status" in df.columns else 0
+                        st.metric("เรียนจบแล้ว", f"{completed_count} รายการ")
+                    
+                    with col_stat2:
+                        if "enrollment_date" in df.columns:
+                            today = datetime.now().strftime("%Y-%m-%d")
+                            today_count = df[df["enrollment_date"].str.contains(today)].shape[0] if df["enrollment_date"].dtype == 'object' else 0
+                            st.metric("ลงทะเบียนวันนี้", f"{today_count} รายการ")
+                else:
+                    st.info("ยังไม่มีข้อมูลการลงทะเบียน")
+            
+            elif view_option == "ข้อมูลการเข้าเรียน":
+                df = get_student_check_data()
+                if not df.empty:
+                    st.write(f"**จำนวนการเข้าเรียน:** {len(df)} ครั้ง")
+                    st.dataframe(df)
+                else:
+                    st.info("ยังไม่มีข้อมูลการเข้าเรียน")
+        
+        with tab3:
+            st.subheader("ดาวน์โหลดไฟล์ Template")
+            
+            st.markdown("""
+            <div class="info-box">
+            <h4>📋 คำแนะนำการใช้งานไฟล์ Template</h4>
+            <ol>
+            <li>ดาวน์โหลดไฟล์ Template ที่ต้องการ</li>
+            <li>เปิดไฟล์ใน Excel หรือ Google Sheets</li>
+            <li>กรอกข้อมูลตามโครงสร้างที่กำหนด</li>
+            <li>บันทึกไฟล์เป็นรูปแบบ .xlsx</li>
+            <li>อัปโหลดกลับเข้าสู่ระบบ</li>
+            </ol>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            col_temp1, col_temp2, col_temp3 = st.columns(3)
+            
+            with col_temp1:
+                st.markdown('<div class="template-card">', unsafe_allow_html=True)
+                st.markdown('<div class="template-icon">👥</div>', unsafe_allow_html=True)
+                st.write("**Template ข้อมูลนักเรียน**")
+                
+                # สร้าง template ข้อมูลนักเรียน
+                template_students = pd.DataFrame(columns=[
+                    "student_id", "fullname", "email", "phone", "status"
+                ])
+                
+                # เพิ่มข้อมูลตัวอย่าง
+                sample_students = [
+                    ["ZLS101", "สมชาย ใจดี", "somchai@example.com", "0812345678", "active"],
+                    ["ZLS102", "สมหญิง เก่งเรียน", "somying@example.com", "0823456789", "active"],
+                    ["ZLS103", "นักศึกษา ตัวอย่าง", "student@example.com", "0834567890", "active"]
+                ]
+                
+                for sample in sample_students:
+                    template_students.loc[len(template_students)] = sample
+                
+                csv_students = template_students.to_csv(index=False, encoding='utf-8-sig')
+                
+                st.download_button(
+                    label="📥 ดาวน์โหลด",
+                    data=csv_students,
+                    file_name="template_students.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col_temp2:
+                st.markdown('<div class="template-card">', unsafe_allow_html=True)
+                st.markdown('<div class="template-icon">📚</div>', unsafe_allow_html=True)
+                st.write("**Template ข้อมูลคอร์ส**")
+                
+                # สร้าง template ข้อมูลคอร์ส
+                template_courses = pd.DataFrame(columns=[
+                    "course_id", "course_name", "teacher_id", "teacher_name",
+                    "description", "jitsi_room", "max_students", "class_type", "status"
+                ])
+                
+                # เพิ่มข้อมูลตัวอย่าง
+                sample_courses = [
+                    ["C0001", "คณิตศาสตร์พื้นฐาน", "T001", "ครูสมชาย", "เรียนคณิตศาสตร์พื้นฐาน", "math-room", 30, "กลุ่ม", "active"],
+                    ["C0002", "ภาษาอังกฤษเบื้องต้น", "T002", "ครูสมหญิง", "เรียนภาษาอังกฤษเบื้องต้น", "english-room", 25, "กลุ่ม", "active"]
+                ]
+                
+                for sample in sample_courses:
+                    template_courses.loc[len(template_courses)] = sample
+                
+                csv_courses = template_courses.to_csv(index=False, encoding='utf-8-sig')
+                
+                st.download_button(
+                    label="📥 ดาวน์โหลด",
+                    data=csv_courses,
+                    file_name="template_courses.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col_temp3:
+                st.markdown('<div class="template-card">', unsafe_allow_html=True)
+                st.markdown('<div class="template-icon">👨‍🏫</div>', unsafe_allow_html=True)
+                st.write("**Template ข้อมูลครู**")
+                
+                # สร้าง template ข้อมูลครู
+                template_admin = pd.DataFrame(columns=[
+                    "teacher_id", "username", "password_hash", "fullname", "email", "role"
+                ])
+                
+                # เพิ่มข้อมูลตัวอย่าง (password_hash มาจาก md5("password123"))
+                sample_admin = [
+                    ["T001", "teacher1", "482c811da5d5b4bc6d497ffa98491e38", "ครูสมชาย", "teacher1@example.com", "teacher"],
+                    ["T002", "teacher2", "482c811da5d5b4bc6d497ffa98491e38", "ครูสมหญิง", "teacher2@example.com", "teacher"]
+                ]
+                
+                for sample in sample_admin:
+                    template_admin.loc[len(template_admin)] = sample
+                
+                csv_admin = template_admin.to_csv(index=False, encoding='utf-8-sig')
+                
+                st.download_button(
+                    label="📥 ดาวน์โหลด",
+                    data=csv_admin,
+                    file_name="template_admin.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            # ปุ่มโหลดข้อมูลจากไฟล์ในเครื่อง
+            st.markdown("---")
+            st.subheader("โหลดข้อมูลจากไฟล์ในเครื่อง")
+            
+            if st.button("🔄 โหลดข้อมูลจากไฟล์ในเครื่อง", use_container_width=True):
+                if load_template_data():
+                    st.success("✅ โหลดข้อมูลจากไฟล์ในเครื่องสำเร็จ")
+                    st.rerun()
+                else:
+                    st.error("❌ ไม่สามารถโหลดข้อมูลจากไฟล์ในเครื่องได้")
+    
     # ---------- MANAGE COURSES ----------
     elif menu_choice == "📚 จัดการคอร์ส":
         st.title("📚 จัดการคอร์สเรียน")
         st.markdown("---")
         
         try:
-            my_courses = get_teacher_courses_fb(st.session_state.teacher_id)
+            courses_df = get_courses_data()
+            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
             
-            if my_courses:
-                for course in my_courses:
-                    with st.expander(f"{course['course_name']} ({course.get('class_type', 'กลุ่ม')})", expanded=True):
+            if not my_courses.empty:
+                for idx, row in my_courses.iterrows():
+                    with st.expander(f"{row['course_name']} ({row.get('class_type', 'กลุ่ม')})", expanded=True):
                         col1, col2 = st.columns([3, 1])
                         
                         with col1:
-                            image_path = course.get("image_path", "")
-                            if image_path and image_path.startswith('http'):
+                            image_path = row.get("image_path", "")
+                            if image_path and os.path.exists(image_path):
                                 st.image(image_path, width=150)
                             
-                            st.write(f"**รหัสคอร์ส:** {course['course_id']}")
-                            st.write(f"**คำอธิบาย:** {course.get('description', '')}")
-                            st.write(f"**จำนวนนักเรียนสูงสุด:** {course.get('max_students', 10)} คน")
-                            st.write(f"**ห้อง Jitsi:** {course.get('jitsi_room', 'ยังไม่ได้ตั้งค่า')}")
-                            st.write(f"**สถานะ:** {course.get('status', 'active')}")
+                            st.write(f"**รหัสคอร์ส:** {row['course_id']}")
+                            st.write(f"**คำอธิบาย:** {row.get('description', '')}")
+                            st.write(f"**จำนวนนักเรียนสูงสุด:** {row.get('max_students', 10)} คน")
+                            st.write(f"**ห้อง Jitsi:** {row.get('jitsi_room', 'ยังไม่ได้ตั้งค่า')}")
+                            st.write(f"**สถานะ:** {row.get('status', 'active')}")
                         
                         with col2:
-                            if st.button("✏️ แก้ไข", key=f"edit_{course['course_id']}", use_container_width=True):
-                                st.session_state.edit_course = course
+                            if st.button("✏️ แก้ไข", key=f"edit_{row['course_id']}", use_container_width=True):
+                                st.session_state.edit_course = row.to_dict()
                                 st.session_state.page = "edit_course"
                                 st.rerun()
                             
-                            if st.button("📖 บทเรียน", key=f"lessons_{course['course_id']}", use_container_width=True):
-                                st.session_state.current_course = course['course_id']
+                            if st.button("📖 บทเรียน", key=f"lessons_{row['course_id']}", use_container_width=True):
+                                st.session_state.current_course = row['course_id']
                                 st.session_state.page = "manage_lessons"
                                 st.rerun()
                             
-                            if st.button("🎥 สอนสด", key=f"go_live_{course['course_id']}", use_container_width=True):
-                                st.session_state.current_course = course
+                            if st.button("🎥 สอนสด", key=f"go_live_{row['course_id']}", use_container_width=True):
+                                st.session_state.current_course = row.to_dict()
                                 st.session_state.page = "live_teaching"
                                 st.rerun()
             else:
@@ -2490,24 +2957,30 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
                     st.error("กรุณากรอกข้อมูลที่จำเป็น (*)")
                 else:
                     try:
+                        courses_df = get_courses_data()
+                        
                         # Generate course ID
-                        all_courses = get_all_courses()
-                        course_id = f"C{len(all_courses) + 1:04d}"
+                        course_id = f"C{len(courses_df) + 1:04d}"
                         
-                        # Save image to Firebase Storage if exists
-                        img_url = ""
+                        # Save image
+                        img_path = ""
                         if image:
-                            file_bytes = image.getvalue()
-                            storage_path = f"course_images/{course_id}_{image.name}"
-                            img_url = upload_file_to_storage(file_bytes, storage_path, 'image/jpeg')
+                            img_path = f"save_data/images/{course_id}_{image.name}"
+                            try:
+                                os.makedirs(os.path.dirname(img_path), exist_ok=True)
+                                with open(img_path, "wb") as f:
+                                    f.write(image.getbuffer())
+                            except Exception as e:
+                                st.warning(f"ไม่สามารถบันทึกรูปภาพ: {e}")
+                                img_path = ""
                         
-                        # Add course to Firestore
+                        # Add course
                         new_course = {
                             "course_id": course_id,
                             "course_name": course_name,
                             "teacher_id": st.session_state.teacher_id,
                             "teacher_name": st.session_state.teacher_name,
-                            "image_path": img_url,
+                            "image_path": img_path,
                             "jitsi_room": jitsi_room,
                             "description": description,
                             "max_students": max_students,
@@ -2518,7 +2991,21 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
                             "created_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         }
                         
-                        add_course(new_course)
+                        courses_df = pd.concat([courses_df, pd.DataFrame([new_course])], ignore_index=True)
+                        
+                        # บันทึกทั้งใน session state และไฟล์
+                        st.session_state.current_courses = courses_df
+                        courses_df.to_excel("data/courses.xlsx", index=False)
+                        
+                        # Create lesson file
+                        lesson_file = f"save_data/lessons/{course_id}_lessons.json"
+                        with open(lesson_file, "w", encoding="utf-8") as f:
+                            json.dump([], f)
+                        
+                        # Create exercises file
+                        exercise_file = f"save_data/lessons/{course_id}_exercises.json"
+                        with open(exercise_file, "w", encoding="utf-8") as f:
+                            json.dump([], f)
                         
                         st.success(f"✅ **สร้างคอร์ส '{course_name}' สำเร็จ!**")
                         st.info(f"**รหัสคอร์ส:** {course_id}")
@@ -2538,107 +3025,998 @@ elif st.session_state.page == "teacher_dashboard" and st.session_state.role == "
         st.markdown("---")
         
         try:
-            my_courses = get_teacher_courses_fb(st.session_state.teacher_id)
+            courses_df = get_courses_data()
+            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
             
-            if my_courses:
+            if not my_courses.empty:
                 selected_course = st.selectbox(
                     "**เลือกคอร์ส**", 
-                    [c['course_name'] for c in my_courses], 
+                    my_courses["course_name"].tolist(), 
                     key="select_course_lessons"
                 )
-                course_id = next((c['course_id'] for c in my_courses if c['course_name'] == selected_course), None)
+                course_id = my_courses[my_courses["course_name"] == selected_course]["course_id"].iloc[0]
                 
-                if course_id:
-                    st.write(f"**คอร์ส:** {selected_course}")
-                    st.markdown("---")
-                    
-                    # Load existing lessons
-                    lessons = get_course_lessons_fb(course_id)
-                    
-                    # Display existing lessons
-                    st.subheader("บทเรียนที่มีอยู่")
-                    if lessons:
-                        for i, lesson in enumerate(lessons):
-                            with st.expander(f"บทที่ {i+1}: {lesson.get('title', 'ไม่มีชื่อ')}", expanded=False):
-                                st.write(f"**หัวข้อ:** {lesson.get('title', 'ไม่มีชื่อ')}")
-                                
-                                # แสดงไฟล์แนบถ้ามี
-                                if lesson.get('file_url'):
-                                    file_url = lesson.get('file_url')
-                                    st.write(f"**ไฟล์แนบ:** {os.path.basename(file_url) if 'http' in file_url else file_url}")
-                                    st.markdown(f'<a href="{file_url}" download style="text-decoration: none;"><button style="background: linear-gradient(135deg, #1A237E, #3949AB); color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer;">📥 ดาวน์โหลดไฟล์</button></a>', unsafe_allow_html=True)
-                                
-                                # ปุ่มจัดการ
-                                col1, col2, col3 = st.columns(3)
-                                
-                                with col1:
-                                    if st.button("✏️ แก้ไข", key=f"edit_lesson_{course_id}_{i}", use_container_width=True):
-                                        st.session_state.edit_lesson_idx = i
-                                        st.session_state.edit_course_id = course_id
-                                        st.session_state.page = "edit_lesson"
-                                        st.rerun()
-                                
-                                with col2:
-                                    if st.button("🗑️ ลบเนื้อหา", key=f"delete_content_{course_id}_{i}", use_container_width=True):
-                                        # ลบเฉพาะเนื้อหา แต่ไม่ลบบทเรียนทั้งหมด
-                                        update_lesson(lesson['id'], {"content": ""})
-                                        st.success("✅ ลบเนื้อหาบทเรียนเรียบร้อย")
-                                        time.sleep(1)
-                                        st.rerun()
-                                
-                                with col3:
-                                    if st.button("🗑️ ลบบทเรียน", key=f"delete_lesson_{course_id}_{i}", use_container_width=True, type="secondary"):
-                                        # ลบบทเรียนทั้งหมด
-                                        # Note: In Firebase, we need to delete the document
-                                        st.warning("Feature under development")
-                    else:
-                        st.info("ยังไม่มีบทเรียนในคอร์สนี้")
-                    
-                    # Add new lesson
-                    st.subheader("เพิ่มบทเรียนใหม่")
-                    with st.form("add_lesson_form", clear_on_submit=True):
-                        lesson_title = st.text_input("**หัวข้อบทเรียน** *", key=f"new_lesson_title_{course_id}")
-                        lesson_content = st.text_area("**เนื้อหาบทเรียน** *", height=200, key=f"new_lesson_content_{course_id}")
-                        lesson_file_upload = st.file_uploader(
-                            "**อัปโหลดไฟล์ประกอบ** (ไม่บังคับ)", 
-                            type=["pdf", "ppt", "pptx", "doc", "docx", "txt"], 
-                            key=f"lesson_file_upload_{course_id}"
-                        )
-                        
-                        col_add, col_cancel = st.columns(2)
-                        with col_add:
-                            submitted = st.form_submit_button("✅ เพิ่มบทเรียน", use_container_width=True)
-                        
-                        if submitted:
-                            if lesson_title and lesson_content:
-                                # Save uploaded file
-                                file_url = ""
-                                if lesson_file_upload:
-                                    file_bytes = lesson_file_upload.getvalue()
-                                    storage_path = f"lesson_files/{course_id}/{lesson_file_upload.name}"
-                                    file_url = upload_file_to_storage(file_bytes, storage_path)
-                                
-                                # Add new lesson
-                                new_lesson = {
-                                    "title": lesson_title,
-                                    "content": lesson_content,
-                                    "file_url": file_url,
-                                    "course_id": course_id,
-                                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                }
-                                
-                                success = save_lesson_fb(course_id, new_lesson)
-                                if success:
-                                    st.success("✅ **เพิ่มบทเรียนสำเร็จ!**")
+                st.write(f"**คอร์ส:** {selected_course}")
+                st.markdown("---")
+                
+                # Load existing lessons
+                lessons = get_course_lessons(course_id)
+                
+                # Display existing lessons
+                st.subheader("บทเรียนที่มีอยู่")
+                if lessons:
+                    for i, lesson in enumerate(lessons):
+                        with st.expander(f"บทที่ {i+1}: {lesson.get('title', 'ไม่มีชื่อ')}", expanded=False):
+                            # แสดงเฉพาะหัวข้อและไฟล์ ไม่แสดงเนื้อหา
+                            st.write(f"**หัวข้อ:** {lesson.get('title', 'ไม่มีชื่อ')}")
+                            
+                            # แสดงไฟล์แนบถ้ามี
+                            if lesson.get('file'):
+                                file_path = lesson.get('file')
+                                if file_path and os.path.exists(file_path):
+                                    st.write(f"**ไฟล์แนบ:** {os.path.basename(file_path)}")
+                                    try:
+                                        with open(file_path, "rb") as f:
+                                            file_bytes = f.read()
+                                        st.download_button(
+                                            label="📥 ดาวน์โหลดไฟล์",
+                                            data=file_bytes,
+                                            file_name=os.path.basename(file_path),
+                                            mime="application/octet-stream",
+                                            key=f"download_lesson_{course_id}_{i}",
+                                            use_container_width=True
+                                        )
+                                    except:
+                                        st.warning("ไม่สามารถโหลดไฟล์")
+                            
+                            # ปุ่มจัดการ
+                            col1, col2, col3 = st.columns(3)
+                            
+                            with col1:
+                                if st.button("✏️ แก้ไข", key=f"edit_lesson_{course_id}_{i}", use_container_width=True):
+                                    st.session_state.edit_lesson_idx = i
+                                    st.session_state.edit_course_id = course_id
+                                    st.session_state.page = "edit_lesson"
                                     st.rerun()
+                            
+                            with col2:
+                                if st.button("🗑️ ลบเนื้อหา", key=f"delete_content_{course_id}_{i}", use_container_width=True):
+                                    # ลบเฉพาะเนื้อหา แต่ไม่ลบบทเรียนทั้งหมด
+                                    lessons[i]["content"] = ""
+                                    lesson_file = f"save_data/lessons/{course_id}_lessons.json"
+                                    with open(lesson_file, "w", encoding="utf-8") as f:
+                                        json.dump(lessons, f, ensure_ascii=False, indent=2)
+                                    st.success("✅ ลบเนื้อหาบทเรียนเรียบร้อย")
+                                    time.sleep(1)
+                                    st.rerun()
+                            
+                            with col3:
+                                if st.button("🗑️ ลบบทเรียน", key=f"delete_lesson_{course_id}_{i}", use_container_width=True, type="secondary"):
+                                    # ลบบทเรียนทั้งหมด
+                                    lessons.pop(i)
+                                    lesson_file = f"save_data/lessons/{course_id}_lessons.json"
+                                    with open(lesson_file, "w", encoding="utf-8") as f:
+                                        json.dump(lessons, f, ensure_ascii=False, indent=2)
+                                    st.success("✅ ลบบทเรียนเรียบร้อย")
+                                    time.sleep(1)
+                                    st.rerun()
+                else:
+                    st.info("ยังไม่มีบทเรียนในคอร์สนี้")
+                
+                # Add new lesson
+                st.subheader("เพิ่มบทเรียนใหม่")
+                with st.form("add_lesson_form", clear_on_submit=True):
+                    lesson_title = st.text_input("**หัวข้อบทเรียน** *", key=f"new_lesson_title_{course_id}")
+                    lesson_content = st.text_area("**เนื้อหาบทเรียน** *", height=200, key=f"new_lesson_content_{course_id}")
+                    lesson_file_upload = st.file_uploader(
+                        "**อัปโหลดไฟล์ประกอบ** (ไม่บังคับ)", 
+                        type=["pdf", "ppt", "pptx", "doc", "docx", "txt"], 
+                        key=f"lesson_file_upload_{course_id}"
+                    )
+                    
+                    col_add, col_cancel = st.columns(2)
+                    with col_add:
+                        submitted = st.form_submit_button("✅ เพิ่มบทเรียน", use_container_width=True)
+                    
+                    if submitted:
+                        if lesson_title and lesson_content:
+                            # Save uploaded file
+                            file_path = ""
+                            if lesson_file_upload:
+                                success, result = save_document(course_id, lesson_file_upload, lesson_file_upload.name)
+                                if success:
+                                    file_path = result
                                 else:
-                                    st.error("เกิดข้อผิดพลาดในการบันทึกบทเรียน")
+                                    st.warning(f"ไม่สามารถบันทึกไฟล์: {result}")
+                            
+                            # Add new lesson
+                            new_lesson = {
+                                "title": lesson_title,
+                                "content": lesson_content,
+                                "file": file_path,
+                                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }
+                            
+                            success = save_lesson(course_id, new_lesson)
+                            if success:
+                                st.success("✅ **เพิ่มบทเรียนสำเร็จ!**")
+                                st.rerun()
                             else:
-                                st.error("กรุณากรอกข้อมูลที่จำเป็น (*)")
+                                st.error("เกิดข้อผิดพลาดในการบันทึกบทเรียน")
+                        else:
+                            st.error("กรุณากรอกข้อมูลที่จำเป็น (*)")
             else:
                 st.info("ยังไม่มีคอร์สเรียน")
         except Exception as e:
             st.error(f"เกิดข้อผิดพลาด: {e}")
+    
+    # ---------- MANAGE EXERCISES (with Image Upload) ----------
+    elif menu_choice == "📝 จัดการแบบฝึกหัด":
+        st.title("📝 จัดการแบบฝึกหัด")
+        st.markdown("---")
+        
+        try:
+            courses_df = get_courses_data()
+            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+            
+            if not my_courses.empty:
+                selected_course = st.selectbox(
+                    "**เลือกคอร์ส**", 
+                    my_courses["course_name"].tolist(), 
+                    key="select_course_exercises"
+                )
+                course_id = my_courses[my_courses["course_name"] == selected_course]["course_id"].iloc[0]
+                
+                st.write(f"**คอร์ส:** {selected_course}")
+                st.markdown("---")
+                
+                # Load existing exercises
+                exercises_data = get_course_exercises(course_id)
+                
+                # Display existing exercises
+                st.subheader("แบบฝึกหัดที่มีอยู่")
+                if exercises_data:
+                    for lesson_index, lesson_exercises in enumerate(exercises_data):
+                        exercises = lesson_exercises.get("exercises", [])
+                        if exercises:
+                            st.write(f"**บทที่ {lesson_index + 1}**")
+                            for i, exercise in enumerate(exercises):
+                                with st.expander(f"แบบฝึกหัดที่ {i+1}"):
+                                    st.write(f"**คำถาม:** {exercise.get('question', '')}")
+                                    
+                                    # Display image if exists
+                                    if exercise.get("image_path") and os.path.exists(exercise["image_path"]):
+                                        st.image(exercise["image_path"], width=300)
+                                    
+                                    st.write(f"**เฉลย:** {exercise.get('answer', '')}")
+                
+                # Add new exercise
+                st.subheader("เพิ่มแบบฝึกหัดใหม่")
+                
+                # Get lessons for selection
+                lessons = get_course_lessons(course_id)
+                
+                if lessons:
+                    with st.form("add_exercise_form"):
+                        lesson_options = [f"บทที่ {i+1}: {l.get('title', 'ไม่มีชื่อ')}" for i, l in enumerate(lessons)]
+                        selected_lesson = st.selectbox("เลือกบทเรียน", lesson_options, key="exercise_lesson_select")
+                        lesson_index = int(selected_lesson.split(":")[0].replace("บทที่ ", "")) - 1
+                        
+                        exercise_question = st.text_area("**คำถาม** *", height=100, key="exercise_question_input")
+                        
+                        # Image upload for exercise
+                        exercise_image = st.file_uploader(
+                            "**อัปโหลดรูปภาพ** (ไม่บังคับ - สำหรับ Quiz ทายรูป)",
+                            type=["jpg", "jpeg", "png", "gif"],
+                            key="exercise_image_upload"
+                        )
+                        
+                        exercise_answer = st.text_area("**เฉลย** *", height=100, key="exercise_answer_input")
+                        
+                        col_save, col_cancel = st.columns(2)
+                        with col_save:
+                            submitted = st.form_submit_button("✅ บันทึกแบบฝึกหัด", use_container_width=True)
+                        
+                        if submitted:
+                            if exercise_question and exercise_answer:
+                                # Save image if uploaded
+                                image_path = ""
+                                if exercise_image:
+                                    # Find next exercise index
+                                    if exercises_data and lesson_index < len(exercises_data):
+                                        next_exercise_index = len(exercises_data[lesson_index].get("exercises", []))
+                                    else:
+                                        next_exercise_index = 0
+                                    
+                                    success, result = save_exercise_image(course_id, f"{lesson_index}_{next_exercise_index}", exercise_image)
+                                    if success:
+                                        image_path = result
+                                    else:
+                                        st.warning(f"ไม่สามารถบันทึกรูปภาพ: {result}")
+                                
+                                # Create exercise data
+                                new_exercise = {
+                                    "lesson_index": lesson_index,
+                                    "exercises": [{
+                                        "question": exercise_question,
+                                        "answer": exercise_answer,
+                                        "image_path": image_path,
+                                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    }]
+                                }
+                                
+                                success = save_exercise(course_id, new_exercise)
+                                if success:
+                                    st.success("✅ **บันทึกแบบฝึกหัดสำเร็จ!**")
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error("เกิดข้อผิดพลาดในการบันทึกแบบฝึกหัด")
+                            else:
+                                st.error("กรุณากรอกข้อมูลให้ครบถ้วน")
+                else:
+                    st.info("กรุณาสร้างบทเรียนก่อนเพิ่มแบบฝึกหัด")
+            else:
+                st.info("ยังไม่มีคอร์สเรียน")
+        except Exception as e:
+            st.error(f"เกิดข้อผิดพลาด: {e}")
+    
+    # ---------- LIVE TEACHING (70/30 Layout) ----------
+    elif menu_choice == "🎥 สอนสด":
+        st.title("🎥 การสอนสด")
+        st.markdown("---")
+        
+        try:
+            courses_df = get_courses_data()
+            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+            
+            if not my_courses.empty:
+                selected_course = st.selectbox(
+                    "**เลือกคอร์ส**", 
+                    my_courses["course_name"].tolist(), 
+                    key="live_course_select"
+                )
+                course_info = my_courses[my_courses["course_name"] == selected_course].iloc[0]
+                
+                st.subheader(f"คอร์ส: {course_info['course_name']}")
+                st.write(f"**ครูผู้สอน:** {st.session_state.teacher_name}")
+                st.markdown("---")
+                
+                # Save Jitsi info
+                st.session_state.jitsi_room_name = course_info.get('jitsi_room', 'default_room')
+                st.session_state.jitsi_display_name = st.session_state.teacher_name
+                
+                # Jitsi Connection Control
+                col_connect, col_disconnect = st.columns(2)
+                with col_connect:
+                    if st.button("🔗 เริ่มการสอนสด", type="primary", use_container_width=True):
+                        st.session_state.jitsi_connected = True
+                        st.rerun()
+                with col_disconnect:
+                    if st.button("❌ หยุดการสอน", use_container_width=True):
+                        st.session_state.jitsi_connected = False
+                        st.rerun()
+                
+                # Split screen layout for teacher (70/30)
+                col_video, col_control = st.columns([7, 3])
+                
+                with col_video:
+                    # Live video section (70%)
+                    st.markdown("### 🎥 ห้องเรียนสด (ครูผู้สอน)")
+                    
+                    if st.session_state.jitsi_connected:
+                        room = str(course_info.get("jitsi_room", "default_room"))
+                        
+                        # Jitsi for teacher
+                        st.markdown(embed_jitsi_meet(room, st.session_state.teacher_name, fixed=False), unsafe_allow_html=True)
+                    else:
+                        st.info("โปรดกดปุ่ม 'เริ่มการสอนสด' เพื่อเริ่มเซสชันการสอน")
+                    
+                    # Link for students
+                    st.markdown("---")
+                    st.markdown("### 🔗 ลิงก์สำหรับนักเรียน")
+                    room = course_info.get("jitsi_room", "default_room")
+                    st.code(f"https://meet.jit.si/{room}", language="bash")
+                
+                with col_control:
+                    # Control panel (30%)
+                    st.markdown("### 📋 การจัดการการสอน")
+                    
+                    # Lesson materials
+                    course_id = course_info["course_id"]
+                    lessons = get_course_lessons(course_id)
+                    
+                    if lessons:
+                        st.write("**📚 บทเรียน:**")
+                        for i, lesson in enumerate(lessons):
+                            if st.button(f"บทที่ {i+1}: {lesson.get('title', '')[:15]}...", 
+                                       key=f"teach_lesson_{i}", 
+                                       use_container_width=True):
+                                st.session_state.current_lesson = lesson
+                    
+                    # Mark course as completed
+                    st.markdown("---")
+                    st.markdown("### ✅ ประกาศเรียนจบคอร์ส")
+                    
+                    col_complete, col_cancel = st.columns(2)
+                    with col_complete:
+                        if st.button("ประกาศเรียนจบ", type="primary", key="mark_completed", use_container_width=True):
+                            try:
+                                student_courses_df = get_student_courses_data()
+                                mask = student_courses_df["course_id"] == course_info["course_id"]
+                                student_courses_df.loc[mask, "completion_status"] = True
+                                student_courses_df.loc[mask, "completion_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                
+                                # บันทึกทั้งใน session state และไฟล์
+                                st.session_state.student_courses_df = student_courses_df
+                                student_courses_df.to_excel("save_data/student_courses.xlsx", index=False)
+                                
+                                st.success("✅ **ประกาศเรียนจบคอร์สเรียบร้อย!**")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"เกิดข้อผิดพลาด: {e}")
+                    
+                    with col_cancel:
+                        if st.button("ยกเลิก", type="secondary", key="cancel_completion", use_container_width=True):
+                            try:
+                                student_courses_df = get_student_courses_data()
+                                mask = student_courses_df["course_id"] == course_info["course_id"]
+                                student_courses_df.loc[mask, "completion_status"] = False
+                                student_courses_df.loc[mask, "completion_date"] = None
+                                
+                                # บันทึกทั้งใน session state และไฟล์
+                                st.session_state.student_courses_df = student_courses_df
+                                student_courses_df.to_excel("save_data/student_courses.xlsx", index=False)
+                                
+                                st.warning("⚠️ **ยกเลิกการประกาศเรียนจบเรียบร้อย**")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"เกิดข้อผิดพลาด: {e}")
+                    
+                    # Secure link
+                    st.markdown("---")
+                    st.markdown("### 🔒 ลิงก์เรียนที่ปลอดภัย")
+                    base_url = "https://your-app.streamlit.app"
+                    security_code = course_info.get("security_code", "DEFAULT123")
+                    secure_link = f"{base_url}/?course={course_info['course_id']}&code={security_code}&teacher={st.session_state.teacher_id}"
+                    st.code(secure_link, language="bash")
+                    
+                    # End session
+                    st.markdown("---")
+                    if st.button("🏁 จบการเรียน", type="secondary", key="end_session", use_container_width=True):
+                        st.session_state.jitsi_connected = False
+                        st.session_state.page = "teacher_dashboard"
+                        st.rerun()
+            else:
+                st.info("ยังไม่มีคอร์สเรียน")
+        except Exception as e:
+            st.error(f"เกิดข้อผิดพลาด: {e}")
+    
+    # ---------- UPLOAD DOCUMENTS ----------
+    elif menu_choice == "📤 อัปโหลดเอกสาร":
+        st.title("📤 อัปโหลดเอกสารประกอบการเรียน")
+        st.markdown("---")
+        
+        try:
+            courses_df = get_courses_data()
+            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+            
+            if not my_courses.empty:
+                selected_course = st.selectbox(
+                    "**เลือกคอร์ส**", 
+                    my_courses["course_name"].tolist(), 
+                    key="upload_course_select"
+                )
+                course_id = my_courses[my_courses["course_name"] == selected_course]["course_id"].iloc[0]
+                
+                st.subheader(f"คอร์ส: {selected_course}")
+                st.info("เอกสารเหล่านี้จะปรากฏให้นักเรียนดาวน์โหลดได้เมื่อเรียนจบคอร์สแล้วเท่านั้น")
+                st.markdown("---")
+                
+                # Upload new document
+                uploaded_file = st.file_uploader(
+                    "**เลือกไฟล์เอกสาร**", 
+                    type=["pdf", "doc", "docx", "ppt", "pptx", "txt", "jpg", "png"],
+                    key="document_uploader"
+                )
+                
+                if uploaded_file is not None:
+                    success, result = save_document(course_id, uploaded_file, uploaded_file.name)
+                    if success:
+                        st.success(f"✅ **อัปโหลดไฟล์ '{uploaded_file.name}' สำเร็จ!**")
+                        st.rerun()
+                    else:
+                        st.error(f"เกิดข้อผิดพลาด: {result}")
+                
+                # Show existing documents
+                documents_folder = f"save_data/documents/{course_id}"
+                if os.path.exists(documents_folder):
+                    files = os.listdir(documents_folder)
+                    if files:
+                        st.markdown("---")
+                        st.subheader("เอกสารที่มีอยู่")
+                        for file in files:
+                            col1, col2 = st.columns([3, 1])
+                            with col1:
+                                st.write(f"📄 {file}")
+                            with col2:
+                                file_path = os.path.join(documents_folder, file)
+                                if st.button("🗑️ ลบ", key=f"delete_{file}", use_container_width=True):
+                                    try:
+                                        os.remove(file_path)
+                                        st.success(f"ลบไฟล์ {file} สำเร็จ")
+                                        st.rerun()
+                                    except:
+                                        st.error(f"ไม่สามารถลบไฟล์ {file}")
+                    else:
+                        st.info("ยังไม่มีเอกสารในคอร์สนี้")
+                else:
+                    st.info("ยังไม่มีเอกสารในคอร์สนี้")
+            else:
+                st.info("ยังไม่มีคอร์สเรียน")
+        except Exception as e:
+            st.error(f"เกิดข้อผิดพลาด: {e}")
+    
+    # ---------- ISSUE CERTIFICATES ----------
+    elif menu_choice == "🎓 ออกใบรับรอง":
+        st.title("🎓 ออกใบรับรองการเรียนจบ")
+        st.markdown("---")
+        
+        try:
+            courses_df = get_courses_data()
+            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+        
+            if not my_courses.empty:
+                selected_course = st.selectbox(
+                    "**เลือกคอร์ส**", 
+                    my_courses["course_name"].tolist(), 
+                    key="cert_course_select"
+                )
+                course_id = my_courses[my_courses["course_name"] == selected_course]["course_id"].iloc[0]
+                
+                # Get students who completed this course
+                student_courses_df = get_student_courses_data()
+                completed_students = student_courses_df[
+                    (student_courses_df["course_id"] == course_id) & 
+                    (student_courses_df["completion_status"] == True)
+                ]
+                
+                if not completed_students.empty:
+                    st.subheader(f"นักเรียนที่เรียนจบคอร์ส: {selected_course}")
+                    
+                    for idx, student in completed_students.iterrows():
+                        with st.expander(f"{student['student_id']} - {student['fullname']}"):
+                            col1, col2, col3 = st.columns([3, 1, 1])
+                            
+                            with col1:
+                                st.write(f"**วันที่ลงทะเบียน:** {student['enrollment_date']}")
+                                st.write(f"**วันที่เรียนจบ:** {student.get('completion_date', 'ไม่ระบุ')}")
+                                st.write(f"**ออกใบรับรองแล้ว:** {'✅' if student.get('certificate_issued', False) else '❌'}")
+                            
+                            with col2:
+                                # อัปโหลดใบรับรอง
+                                cert_file = st.file_uploader(
+                                    "อัปโหลดใบรับรอง",
+                                    type=["pdf", "jpg", "png", "doc", "docx"],
+                                    key=f"upload_cert_{student['student_id']}_{course_id}"
+                                )
+                                
+                                if cert_file is not None:
+                                    success, cert_path = save_uploaded_certificate(
+                                        student['student_id'],
+                                        course_id,
+                                        cert_file,
+                                        cert_file.name
+                                    )
+                                    if success:
+                                        st.success("✅ **อัปโหลดใบรับรองสำเร็จ!**")
+                                        
+                                        # Update student record
+                                        student_courses_df.loc[idx, "certificate_issued"] = True
+                                        
+                                        # บันทึกทั้งใน session state และไฟล์
+                                        st.session_state.student_courses_df = student_courses_df
+                                        student_courses_df.to_excel("save_data/student_courses.xlsx", index=False)
+                                        
+                                        st.rerun()
+                                    else:
+                                        st.error(f"เกิดข้อผิดพลาด: {cert_path}")
+                            
+                            with col3:
+                                # ดูใบรับรอง
+                                cert_path = get_certificate_file(student['student_id'], course_id)
+                                if cert_path and os.path.exists(cert_path):
+                                    with open(cert_path, "rb") as f:
+                                        cert_data = f.read()
+                                    cert_name = os.path.basename(cert_path)
+                                    
+                                    if st.download_button(
+                                        label="📥 ดาวน์โหลด",
+                                        data=cert_data,
+                                        file_name=cert_name,
+                                        mime="application/octet-stream",
+                                        key=f"download_cert_{student['student_id']}_{course_id}"
+                                    ):
+                                        pass
+                                else:
+                                    st.info("ไม่มีใบรับรอง")
+                else:
+                    st.info("ยังไม่มีนักเรียนที่เรียนจบคอร์สนี้")
+            else:
+                st.info("ยังไม่มีคอร์สเรียน")
+                
+        except Exception as e:
+            st.error(f"เกิดข้อผิดพลาด: {e}")
+    
+    # ---------- CREATE SECURE LINKS ----------
+    elif menu_choice == "🔗 สร้างลิงก์เรียน":
+        st.title("🔗 สร้างลิงก์เรียนที่ปลอดภัย")
+        st.markdown("---")
+        
+        try:
+            courses_df = get_courses_data()
+            my_courses = courses_df[courses_df["teacher_id"] == st.session_state.teacher_id]
+            
+            if not my_courses.empty:
+                selected_course = st.selectbox(
+                    "**เลือกคอร์ส**", 
+                    my_courses["course_name"].tolist(), 
+                    key="link_course_select"
+                )
+                course_info = my_courses[my_courses["course_name"] == selected_course].iloc[0]
+                
+                st.subheader(f"ลิงก์สำหรับคอร์ส: {selected_course}")
+                
+                # Generate secure link
+                base_url = "https://your-app.streamlit.app"
+                security_code = course_info.get("security_code", "DEFAULT123")
+                secure_link = f"{base_url}/?course={course_info['course_id']}&code={security_code}&teacher={st.session_state.teacher_id}"
+                
+                st.code(secure_link, language="bash")
+                
+                # Security information
+                st.markdown("---")
+                st.subheader("🔒 ข้อมูลความปลอดภัย")
+                st.write(f"**รหัสความปลอดภัย:** `{security_code}`")
+                st.write(f"**รหัสคอร์ส:** `{course_info['course_id']}`")
+                st.write(f"**ห้อง Jitsi:** `{course_info.get('jitsi_room', '')}`")
+                st.write(f"**ประเภทการเรียน:** {course_info.get('class_type', 'กลุ่ม')}")
+                
+                st.markdown('<div class="info-box">', unsafe_allow_html=True)
+                st.write("**📋 ข้อมูลลิงก์:**")
+                st.write("- ลิงก์นี้ปลอดภัยและมีรหัสความปลอดภัย")
+                st.write("- สามารถส่งลิงก์นี้ให้กับนักเรียนที่มีชื่อในระบบเท่านั้น")
+                st.write("- นักเรียนจะต้องตรวจสอบสิทธิ์ด้วย ID ของตนเองก่อนจึงจะสามารถใช้ลิงก์นี้ได้")
+                st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.info("ยังไม่มีคอร์สเรียน")
+        except Exception as e:
+            st.error(f"เกิดข้อผิดพลาด: {e}")
+    
+    # ---------- SAVE AND DOWNLOAD DATA ----------
+    elif menu_choice == "💾 บันทึกและดาวน์โหลดข้อมูล":
+        st.title("💾 บันทึกและดาวน์โหลดข้อมูล")
+        st.markdown("---")
+        
+        # ส่วนบันทึกข้อมูล
+        st.subheader("บันทึกข้อมูลลงไฟล์")
+        
+        col_save1, col_save2, col_save3 = st.columns(3)
+        
+        with col_save1:
+            if st.button("💾 บันทึกข้อมูลนักเรียน", use_container_width=True):
+                if st.session_state.current_students is not None and not st.session_state.current_students.empty:
+                    st.session_state.current_students.to_excel("data/students.xlsx", index=False)
+                    st.success("✅ บันทึกข้อมูลนักเรียนเรียบร้อย")
+                else:
+                    st.warning("ไม่มีข้อมูลนักเรียนที่จะบันทึก")
+        
+        with col_save2:
+            if st.button("💾 บันทึกข้อมูลคอร์ส", use_container_width=True):
+                if st.session_state.current_courses is not None and not st.session_state.current_courses.empty:
+                    st.session_state.current_courses.to_excel("data/courses.xlsx", index=False)
+                    st.success("✅ บันทึกข้อมูลคอร์สเรียบร้อย")
+                else:
+                    st.warning("ไม่มีข้อมูลคอร์สที่จะบันทึก")
+        
+        with col_save3:
+            if st.button("💾 บันทึกข้อมูลครู", use_container_width=True):
+                if st.session_state.current_admin is not None and not st.session_state.current_admin.empty:
+                    st.session_state.current_admin.to_excel("data/admin.xlsx", index=False)
+                    st.success("✅ บันทึกข้อมูลครูเรียบร้อย")
+                else:
+                    st.warning("ไม่มีข้อมูลครูที่จะบันทึก")
+        
+        # ปุ่มบันทึกทั้งหมด
+        st.markdown("---")
+        if st.button("💾 บันทึกข้อมูลทั้งหมด", type="primary", use_container_width=True):
+            if save_all_data():
+                st.success("✅ บันทึกข้อมูลทั้งหมดเรียบร้อย")
+                st.rerun()
+        
+        # ส่วนดาวน์โหลดข้อมูล
+        st.markdown("---")
+        st.subheader("ดาวน์โหลดข้อมูลปัจจุบัน")
+        
+        col_dl1, col_dl2, col_dl3 = st.columns(3)
+        
+        with col_dl1:
+            students_df = get_students_data()
+            if not students_df.empty:
+                csv_students = students_df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📥 ดาวน์โหลดข้อมูลนักเรียน",
+                    data=csv_students,
+                    file_name="students_export.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.button("📥 ดาวน์โหลดข้อมูลนักเรียน", disabled=True, use_container_width=True)
+        
+        with col_dl2:
+            courses_df = get_courses_data()
+            if not courses_df.empty:
+                csv_courses = courses_df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📥 ดาวน์โหลดข้อมูลคอร์ส",
+                    data=csv_courses,
+                    file_name="courses_export.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.button("📥 ดาวน์โหลดข้อมูลคอร์ส", disabled=True, use_container_width=True)
+        
+        with col_dl3:
+            admin_df = get_admin_data()
+            if not admin_df.empty:
+                csv_admin = admin_df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📥 ดาวน์โหลดข้อมูลครู",
+                    data=csv_admin,
+                    file_name="admin_export.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.button("📥 ดาวน์โหลดข้อมูลครู", disabled=True, use_container_width=True)
+        
+        # ดาวน์โหลดข้อมูลกิจกรรม
+        st.markdown("---")
+        st.subheader("ดาวน์โหลดข้อมูลกิจกรรม")
+        
+        col_act1, col_act2 = st.columns(2)
+        
+        with col_act1:
+            student_courses_df = get_student_courses_data()
+            if not student_courses_df.empty:
+                csv_enrollments = student_courses_df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📥 ดาวน์โหลดข้อมูลการลงทะเบียน",
+                    data=csv_enrollments,
+                    file_name="student_courses_export.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.button("📥 ดาวน์โหลดข้อมูลการลงทะเบียน", disabled=True, use_container_width=True)
+        
+        with col_act2:
+            check_df = get_student_check_data()
+            if not check_df.empty:
+                csv_attendance = check_df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📥 ดาวน์โหลดข้อมูลการเข้าเรียน",
+                    data=csv_attendance,
+                    file_name="attendance_export.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.button("📥 ดาวน์โหลดข้อมูลการเข้าเรียน", disabled=True, use_container_width=True)
+        
+        # การตั้งค่าระบบ
+        st.markdown("---")
+        st.subheader("การตั้งค่าระบบ")
+        
+        if st.button("🔄 รีเซ็ตข้อมูลใน Session", type="secondary", use_container_width=True):
+            st.session_state.current_students = None
+            st.session_state.current_courses = None
+            st.session_state.current_admin = None
+            st.session_state.student_courses_df = None
+            st.session_state.students_check_df = None
+            st.success("✅ รีเซ็ตข้อมูลใน Session เรียบร้อย")
+            st.info("ข้อมูลจะถูกโหลดใหม่จากไฟล์ในเครื่องเมื่อต้องการใช้งาน")
+            st.rerun()
+
+# -----------------------------
+# EDIT LESSON PAGE
+# -----------------------------
+elif st.session_state.page == "edit_lesson" and st.session_state.role == "teacher":
+    if "edit_course_id" in st.session_state and "edit_lesson_idx" in st.session_state:
+        course_id = st.session_state.edit_course_id
+        lesson_idx = st.session_state.edit_lesson_idx
+        
+        st.title("✏️ แก้ไขบทเรียน")
+        st.markdown("---")
+        
+        # Load lessons
+        lessons = get_course_lessons(course_id)
+        
+        if 0 <= lesson_idx < len(lessons):
+            lesson = lessons[lesson_idx]
+            
+            with st.form("edit_lesson_form"):
+                lesson_title = st.text_input("**หัวข้อบทเรียน** *", value=lesson.get('title', ''), key="edit_lesson_title")
+                lesson_content = st.text_area("**เนื้อหาบทเรียน** *", value=lesson.get('content', ''), height=200, key="edit_lesson_content")
+                
+                # Current file
+                if lesson.get('file'):
+                    st.write(f"**ไฟล์เดิม:** {os.path.basename(lesson['file'])}")
+                
+                lesson_file_upload = st.file_uploader(
+                    "**อัปโหลดไฟล์ใหม่** (ถ้าต้องการเปลี่ยน)", 
+                    type=["pdf", "ppt", "pptx", "doc", "docx", "txt"], 
+                    key="edit_lesson_file"
+                )
+                
+                st.markdown("---")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    save_btn = st.form_submit_button("💾 บันทึกการแก้ไข", type="primary", use_container_width=True)
+                
+                with col2:
+                    cancel_btn = st.form_submit_button("❌ ยกเลิก", use_container_width=True)
+                
+                if cancel_btn:
+                    st.session_state.page = "manage_lessons"
+                    st.rerun()
+                
+                if save_btn:
+                    if lesson_title and lesson_content:
+                        # Update lesson
+                        lessons[lesson_idx]["title"] = lesson_title
+                        lessons[lesson_idx]["content"] = lesson_content
+                        lessons[lesson_idx]["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        
+                        # Update file if new file uploaded
+                        if lesson_file_upload:
+                            success, result = save_document(course_id, lesson_file_upload, lesson_file_upload.name)
+                            if success:
+                                lessons[lesson_idx]["file"] = result
+                        
+                        # Save to file
+                        lesson_file = f"save_data/lessons/{course_id}_lessons.json"
+                        with open(lesson_file, "w", encoding="utf-8") as f:
+                            json.dump(lessons, f, ensure_ascii=False, indent=2)
+                        
+                        st.success("✅ **บันทึกการแก้ไขสำเร็จ!**")
+                        time.sleep(1)
+                        st.session_state.page = "manage_lessons"
+                        st.rerun()
+                    else:
+                        st.error("กรุณากรอกข้อมูลที่จำเป็น (*)")
+        else:
+            st.error("ไม่พบบทเรียน")
+            st.session_state.page = "manage_lessons"
+            st.rerun()
+    else:
+        st.session_state.page = "teacher_dashboard"
+        st.rerun()
+
+# -----------------------------
+# EDIT COURSE PAGE
+# -----------------------------
+elif st.session_state.page == "edit_course" and st.session_state.role == "teacher":
+    if "edit_course" in st.session_state:
+        course_info = st.session_state.edit_course
+        
+        st.title("✏️ แก้ไขข้อมูลคอร์ส")
+        st.markdown("---")
+        
+        with st.form("edit_course_form"):
+            st.subheader("ข้อมูลพื้นฐาน")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                course_name = st.text_input("**ชื่อคอร์ส** *", value=course_info.get('course_name', ''), key="edit_course_name")
+                class_type = st.selectbox(
+                    "**ประเภทการเรียน** *", 
+                    ["ตัวต่อตัว (1:1)", "กลุ่มเล็ก (2-5 คน)", "กลุ่มใหญ่"], 
+                    index=["ตัวต่อตัว (1:1)", "กลุ่มเล็ก (2-5 คน)", "กลุ่มใหญ่"].index(course_info.get('class_type', 'กลุ่ม')) 
+                    if course_info.get('class_type') in ["ตัวต่อตัว (1:1)", "กลุ่มเล็ก (2-5 คน)", "กลุ่มใหญ่"] else 0,
+                    key="edit_class_type"
+                )
+            
+            with col2:
+                max_students = st.number_input(
+                    "**จำนวนนักเรียนสูงสุด**", 
+                    min_value=1, max_value=50, 
+                    value=int(course_info.get('max_students', 10)),
+                    key="edit_max_students"
+                )
+                
+                jitsi_room = st.text_input(
+                    "**ชื่อห้อง Jitsi** *", 
+                    value=course_info.get('jitsi_room', ''),
+                    key="edit_jitsi_room"
+                )
+            
+            st.subheader("รายละเอียดคอร์ส")
+            description = st.text_area(
+                "**คำอธิบายคอร์ส** *", 
+                value=course_info.get('description', ''),
+                height=100, 
+                key="edit_description"
+            )
+            
+            status = st.selectbox(
+                "**สถานะ**", 
+                ["active", "inactive", "completed"],
+                index=["active", "inactive", "completed"].index(course_info.get('status', 'active'))
+                if course_info.get('status') in ["active", "inactive", "completed"] else 0,
+                key="edit_status"
+            )
+            
+            st.subheader("รูปภาพคอร์ส")
+            image = st.file_uploader(
+                "**อัปโหลดรูปปกคอร์สใหม่** (ถ้าต้องการเปลี่ยน)", 
+                type=["jpg", "png", "jpeg"], 
+                key="edit_course_image"
+            )
+            
+            st.markdown("---")
+            col1_btn, col2_btn = st.columns(2)
+            
+            with col1_btn:
+                save_btn = st.form_submit_button("💾 บันทึกการแก้ไข", type="primary", use_container_width=True)
+            
+            with col2_btn:
+                cancel_btn = st.form_submit_button("❌ ยกเลิก", use_container_width=True)
+            
+            if cancel_btn:
+                st.session_state.page = "teacher_dashboard"
+                st.rerun()
+            
+            if save_btn:
+                if not all([course_name, jitsi_room, description]):
+                    st.error("กรุณากรอกข้อมูลที่จำเป็น (*)")
+                else:
+                    try:
+                        courses_df = get_courses_data()
+                        
+                        # Find and update course
+                        mask = courses_df["course_id"] == course_info["course_id"]
+                        courses_df.loc[mask, "course_name"] = course_name
+                        courses_df.loc[mask, "class_type"] = class_type
+                        courses_df.loc[mask, "max_students"] = max_students
+                        courses_df.loc[mask, "jitsi_room"] = jitsi_room
+                        courses_df.loc[mask, "description"] = description
+                        courses_df.loc[mask, "status"] = status
+                        
+                        # Update image if new one uploaded
+                        if image:
+                            img_path = f"save_data/images/{course_info['course_id']}_{image.name}"
+                            try:
+                                os.makedirs(os.path.dirname(img_path), exist_ok=True)
+                                with open(img_path, "wb") as f:
+                                    f.write(image.getbuffer())
+                                courses_df.loc[mask, "image_path"] = img_path
+                            except Exception as e:
+                                st.warning(f"ไม่สามารถบันทึกรูปภาพ: {e}")
+                        
+                        # บันทึกทั้งใน session state และไฟล์
+                        st.session_state.current_courses = courses_df
+                        courses_df.to_excel("data/courses.xlsx", index=False)
+                        
+                        st.success("✅ **บันทึกการแก้ไขสำเร็จ!**")
+                        time.sleep(1)
+                        st.session_state.page = "teacher_dashboard"
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"เกิดข้อผิดพลาด: {e}")
+    else:
+        st.session_state.page = "teacher_dashboard"
+        st.rerun()
+
+# -----------------------------
+# MANAGE LESSONS PAGE
+# -----------------------------
+elif st.session_state.page == "manage_lessons" and st.session_state.role == "teacher":
+    st.title("📖 จัดการบทเรียน")
+    st.markdown("---")
+    
+    try:
+        course_id = st.session_state.current_course
+        
+        # Get course details
+        courses_df = get_courses_data()
+        course_info = courses_df[courses_df["course_id"] == course_id].iloc[0]
+        
+        st.write(f"**คอร์ส:** {course_info['course_name']}")
+        st.markdown("---")
+        
+        # Load existing lessons
+        lessons = get_course_lessons(course_id)
+        
+        # Display existing lessons
+        st.subheader("บทเรียนที่มีอยู่")
+        if lessons:
+            for i, lesson in enumerate(lessons):
+                with st.expander(f"บทที่ {i+1}: {lesson.get('title', 'ไม่มีชื่อ')}"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("✏️ แก้ไข", key=f"edit_lesson_{course_id}_{i}", use_container_width=True):
+                            st.session_state.edit_lesson_idx = i
+                            st.session_state.edit_course_id = course_id
+                            st.session_state.page = "edit_lesson"
+                            st.rerun()
+                    with col2:
+                        if st.button("🗑️ ลบ", key=f"delete_lesson_{course_id}_{i}", use_container_width=True):
+                            lessons.pop(i)
+                            lesson_file = f"save_data/lessons/{course_id}_lessons.json"
+                            with open(lesson_file, "w", encoding="utf-8") as f:
+                                json.dump(lessons, f, ensure_ascii=False, indent=2)
+                            st.success("ลบบทเรียนเรียบร้อย")
+                            st.rerun()
+        else:
+            st.info("ยังไม่มีบทเรียนในคอร์สนี้")
+        
+        # Add new lesson
+        st.subheader("เพิ่มบทเรียนใหม่")
+        with st.form("add_lesson_form", clear_on_submit=True):
+            lesson_title = st.text_input("**หัวข้อบทเรียน** *", key=f"new_lesson_title_{course_id}")
+            lesson_content = st.text_area("**เนื้อหาบทเรียน** *", height=200, key=f"new_lesson_content_{course_id}")
+            lesson_file_upload = st.file_uploader(
+                "**อัปโหลดไฟล์ประกอบ** (ไม่บังคับ)", 
+                type=["pdf", "ppt", "pptx", "doc", "docx", "txt"], 
+                key=f"lesson_file_upload_{course_id}"
+            )
+            
+            col_add, col_cancel = st.columns(2)
+            with col_add:
+                submitted = st.form_submit_button("✅ เพิ่มบทเรียน", use_container_width=True)
+            
+            if submitted:
+                if lesson_title and lesson_content:
+                    # Save uploaded file
+                    file_path = ""
+                    if lesson_file_upload:
+                        success, result = save_document(course_id, lesson_file_upload, lesson_file_upload.name)
+                        if success:
+                            file_path = result
+                        else:
+                            st.warning(f"ไม่สามารถบันทึกไฟล์: {result}")
+                    
+                    # Add new lesson
+                    new_lesson = {
+                        "title": lesson_title,
+                        "content": lesson_content,
+                        "file": file_path,
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    
+                    success = save_lesson(course_id, new_lesson)
+                    if success:
+                        st.success("✅ **เพิ่มบทเรียนสำเร็จ!**")
+                        st.rerun()
+                    else:
+                        st.error("เกิดข้อผิดพลาดในการบันทึกบทเรียน")
+                else:
+                    st.error("กรุณากรอกข้อมูลที่จำเป็น (*)")
+        
+        # Back button
+        st.markdown("---")
+        if st.button("⬅ กลับสู่แดชบอร์ด", use_container_width=True):
+            st.session_state.page = "teacher_dashboard"
+            st.rerun()
+            
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาด: {e}")
+        st.session_state.page = "teacher_dashboard"
+        st.rerun()
 
 # -----------------------------
 # Main App Runner
