@@ -13,12 +13,14 @@ eggs/
 lib/
 lib64/
 parts/
-sdist/
+svelte/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Virtual Environment
 venv/
@@ -27,33 +29,34 @@ ENV/
 env.bak/
 venv.bak/
 
+# Streamlit
+.streamlit/secrets.toml
+
+# Firebase
+serviceAccountKey.json
+firebase-credentials.json
+
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# Streamlit
-.streamlit/
-
-# Data files
-save_data/
-credentials.json
-*.pem
-*.key
-*.p12
-
-# Environment variables
-.env
-secrets.toml
-
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+
+# Data files (ถ้าใช้ Firebase ไม่จำเป็นต้องเก็บ)
+data/
+save_data/
+*.xlsx
+*.json
+*.csv
 
 # Logs
 *.log
-
-# Temp files
-*.tmp
-*.temp
