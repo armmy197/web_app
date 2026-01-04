@@ -1,3 +1,9 @@
+
+---
+
+## 📄 **6. ไฟล์: `.gitignore`** (สำหรับ GitHub)
+
+```gitignore
 # Python
 __pycache__/
 *.py[cod]
@@ -13,10 +19,9 @@ eggs/
 lib/
 lib64/
 parts/
-svelte/
+sdist/
 var/
 wheels/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -28,13 +33,6 @@ env/
 ENV/
 env.bak/
 venv.bak/
-
-# Streamlit
-.streamlit/secrets.toml
-
-# Firebase
-serviceAccountKey.json
-firebase-credentials.json
 
 # IDE
 .vscode/
@@ -51,12 +49,25 @@ firebase-credentials.json
 ehthumbs.db
 Thumbs.db
 
-# Data files (ถ้าใช้ Firebase ไม่จำเป็นต้องเก็บ)
-data/
-save_data/
-*.xlsx
-*.json
-*.csv
+# Streamlit
+.streamlit/secrets.toml
 
-# Logs
-*.log
+# Data files (optional - ถ้าไม่อยากเก็บข้อมูลใน git)
+data/*.xlsx
+save_data/*.xlsx
+save_data/certificates_files/*
+save_data/documents/*
+save_data/exercise_images/*
+save_data/images/*
+save_data/lessons/*.json
+save_data/quiz_results/*.json
+
+# แต่ให้เก็บโครงสร้างโฟลเดอร์ไว้
+!data/.gitkeep
+!save_data/.gitkeep
+!save_data/certificates_files/.gitkeep
+!save_data/documents/.gitkeep
+!save_data/exercise_images/.gitkeep
+!save_data/images/.gitkeep
+!save_data/lessons/.gitkeep
+!save_data/quiz_results/.gitkeep
