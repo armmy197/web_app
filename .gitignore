@@ -1,9 +1,3 @@
-
----
-
-## 📄 **6. ไฟล์: `.gitignore`** (สำหรับ GitHub)
-
-```gitignore
 # Python
 __pycache__/
 *.py[cod]
@@ -25,11 +19,12 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
-# Virtual Environment
-venv/
+# Environment
+.env
+.venv
 env/
+venv/
 ENV/
 env.bak/
 venv.bak/
@@ -49,25 +44,11 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-# Streamlit
-.streamlit/secrets.toml
-
-# Data files (optional - ถ้าไม่อยากเก็บข้อมูลใน git)
+# Data files (ถ้าต้องการ git ไม่ติดตามข้อมูล)
 data/*.xlsx
 save_data/*.xlsx
+save_data/*.json
 save_data/certificates_files/*
 save_data/documents/*
 save_data/exercise_images/*
 save_data/images/*
-save_data/lessons/*.json
-save_data/quiz_results/*.json
-
-# แต่ให้เก็บโครงสร้างโฟลเดอร์ไว้
-!data/.gitkeep
-!save_data/.gitkeep
-!save_data/certificates_files/.gitkeep
-!save_data/documents/.gitkeep
-!save_data/exercise_images/.gitkeep
-!save_data/images/.gitkeep
-!save_data/lessons/.gitkeep
-!save_data/quiz_results/.gitkeep
